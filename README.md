@@ -9,6 +9,8 @@ compares against SQLite/libSQL `EXPLAIN QUERY PLAN`, benchmarks real execution
 time, advises on hypothetical indexes, and explains everything through an AI
 copilot — all surfaced in a professional React dashboard.
 
+![DBMS-CP workspace](docs/screenshots/01-workspace.jpg)
+
 > **The optimizer is schema-agnostic.** The 5-table e-commerce database is only a
 > demonstration dataset. Point it at any SQLite/libSQL/Turso database and it keeps
 > working. A test suite proves this by running the whole pipeline against a second,
@@ -23,6 +25,33 @@ Turso/libSQL → Schema Discovery → Statistics → SQL Parser → Relational A
 → Logical Optimizations → Turso EXPLAIN QUERY PLAN → Application Benchmark
 → Index Advisor → AI Explanation → React Dashboard
 ```
+
+## Screenshots
+
+**Execution plan** — the lowest-cost physical plan as an interactive tree. Each node
+shows estimated rows and cost; the bar under each node is a cost-heat indicator
+(expensive operators glow red), and clicking a node opens the operator inspector.
+
+![Execution plan tree](docs/screenshots/02-execution-plan.jpg)
+
+**Candidate plans** — every enumerated join order/method, costed and ranked; the
+selected (lowest-cost) plan is highlighted.
+
+![Candidate plan comparison](docs/screenshots/03-candidates.jpg)
+
+**Logical rewrites** — the original relational-algebra tree vs. the optimized tree
+(predicate pushdown, projection pushdown, join reordering), with quantified cost deltas.
+
+![Relational algebra rewrites](docs/screenshots/04-rewrites.jpg)
+
+**Schema Explorer** — the connected database, discovered dynamically: tables, columns,
+keys, indexes and foreign-key relationships.
+
+![Schema explorer](docs/screenshots/05-schema.jpg)
+
+> The UI clearly separates **estimated** cost-model values from **measured** benchmark
+> timings, and never presents an estimate as a measured speedup. Dark and light themes
+> are both supported.
 
 ## Feature highlights
 
