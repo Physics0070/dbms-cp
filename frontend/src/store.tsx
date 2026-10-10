@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api, OptimizeResult } from "./api";
 
+export type ResultTab =
+  | "summary" | "plan" | "candidates" | "rewrites" | "turso" | "index" | "copilot";
+
 interface Store {
   sql: string;
   setSql: (s: string) => void;
@@ -10,7 +13,9 @@ interface Store {
   benchmark: boolean;
   setBenchmark: (b: boolean) => void;
   runOptimize: () => Promise<void>;
-  loadResult: (r: OptimizeResult) => void;
+  loadResult: (r: OptimizeResult, tab?: ResultTab) => void;
+  tab: ResultTab;
+  setTab: (t: ResultTab) => void;
   theme: "light" | "dark";
   toggleTheme: () => void;
 }
@@ -30,22 +35,25 @@ export function OptimizerProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [benchmark, setBenchmark] = useState(true);
-  const [theme, setTheme] = useState<"light" | "dark">(
-    () => (localStorage.getItem("theme") as "light" | "dark") ||
-      (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-  );
+  const [tab, setTab] = useState<ResultTab>("summary");
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const saved = localStorage.getItem("theme") as "light" | "dark" | null;
+    return saved ?? "dark";
+  });
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.dataset.theme = theme;
     localStorage.setItem("theme", theme);
   }, [theme]);
 
   const runOptimize = useCallback(async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
       localStorage.setItem("sql", sql);
       const r = await api.optimize(sql, { benchmark, index_advisor: true });
       setResult(r);
+      setTab("summary");
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -55,7 +63,8 @@ export function OptimizerProvider({ children }: { children: React.ReactNode }) {
 
   const value: Store = {
     sql, setSql, result, loading, error, benchmark, setBenchmark, runOptimize,
-    loadResult: (r) => { setResult(r); if (r?.sql) setSql(r.sql); },
+    loadResult: (r, t = "summary") => { setResult(r); if (r?.sql) setSql(r.sql); setTab(t); },
+    tab, setTab,
     theme, toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

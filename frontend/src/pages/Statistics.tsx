@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, fmt } from "../api";
 import { GenericBarChart } from "../components/CostChart";
-import { Card, Loading, ErrorState } from "../components/ui";
+import { ErrorNote, Loading, Panel } from "../components/ui";
 
 export default function Statistics() {
   const [tables, setTables] = useState<string[]>([]);
-  const [table, setTable] = useState<string>("");
+  const [table, setTable] = useState("");
   const [stats, setStats] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,70 +23,62 @@ export default function Statistics() {
     api.statistics(table).then(setStats).catch((e) => setError(e.message));
   }, [table]);
 
-  if (error) return <ErrorState message={error} />;
+  if (error) return <ErrorNote message={error} />;
 
   const cols = stats ? Object.values<any>(stats.columns) : [];
-  const distinctChart = cols.map((c: any) => ({ column: c.column, distinct: c.distinct_count }));
+  const chart = cols.map((c: any) => ({ column: c.column, distinct: c.distinct_count }));
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Statistics</h1>
-          <p className="text-sm text-slate-500">Computed from live Turso/libSQL data with SQL aggregates.</p>
+          <h1 className="text-lg font-semibold">Statistics</h1>
+          <p className="text-sm text-muted">Computed live from Turso/libSQL with SQL aggregates.</p>
         </div>
-        <select
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-          value={table} onChange={(e) => setTable(e.target.value)}
-        >
+        <select className="input" value={table} onChange={(e) => setTable(e.target.value)} aria-label="Select table">
           {tables.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-      </header>
+      </div>
 
       {!stats ? <Loading label={`Collecting statistics for ${table}…`} /> : (
-        <>
-          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
-            <span>Row count: <b className="text-slate-800 dark:text-slate-100">{fmt(stats.row_count, 0)}</b></span>
-            <span>·</span>
-            <span>Source: {stats.source}</span>
-            <span>·</span>
-            <span>Collected: {new Date(stats.collected_at).toLocaleString()}</span>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+            <span>Rows <b className="tabular-nums text-ink">{fmt(stats.row_count, 0)}</b></span>
+            <span className="text-faint">·</span>
+            <span>{stats.source}</span>
+            <span className="text-faint">·</span>
+            <span>collected {new Date(stats.collected_at).toLocaleString()}</span>
           </div>
 
-          <Card title="Distinct values per column">
-            <GenericBarChart data={distinctChart} xKey="column" yKey="distinct" color="#0ea5e9" />
-          </Card>
+          <Panel title="Distinct values per column">
+            <GenericBarChart data={chart} xKey="column" yKey="distinct" unit="distinct" />
+          </Panel>
 
-          <Card title="Column statistics">
+          <Panel bodyClass="p-0" title="Column statistics">
             <div className="overflow-x-auto">
               <table className="data">
-                <thead>
-                  <tr>
-                    <th>Column</th><th>Type</th><th className="text-right">Distinct</th>
-                    <th className="text-right">Nulls</th><th className="text-right">Null frac</th>
-                    <th>Min</th><th>Max</th><th>Most common</th>
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th>Column</th><th>Type</th><th className="text-right">Distinct</th><th className="text-right">Nulls</th>
+                  <th className="text-right">Null %</th><th>Min</th><th>Max</th><th>Most common</th>
+                </tr></thead>
                 <tbody>
                   {cols.map((c: any) => (
                     <tr key={c.column}>
-                      <td className="font-mono">{c.column}</td>
-                      <td className="text-slate-500">{c.data_type}</td>
+                      <td className="font-mono text-xs">{c.column}</td>
+                      <td className="text-xs text-muted">{c.data_type}</td>
                       <td className="text-right">{fmt(c.distinct_count, 0)}</td>
                       <td className="text-right">{fmt(c.null_count, 0)}</td>
                       <td className="text-right">{fmt(c.null_fraction * 100)}%</td>
-                      <td className="max-w-[8rem] truncate" title={String(c.min_value)}>{String(c.min_value)}</td>
-                      <td className="max-w-[8rem] truncate" title={String(c.max_value)}>{String(c.max_value)}</td>
-                      <td className="text-xs text-slate-500">
-                        {c.most_common.slice(0, 3).map((m: any) => `${m.value}×${m.count}`).join(", ") || "—"}
-                      </td>
+                      <td className="max-w-[7rem] truncate text-xs" title={String(c.min_value)}>{String(c.min_value)}</td>
+                      <td className="max-w-[7rem] truncate text-xs" title={String(c.max_value)}>{String(c.max_value)}</td>
+                      <td className="text-2xs text-faint">{c.most_common.slice(0, 3).map((m: any) => `${m.value}×${m.count}`).join(", ") || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </Card>
-        </>
+          </Panel>
+        </div>
       )}
     </div>
   );
