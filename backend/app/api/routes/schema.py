@@ -63,6 +63,14 @@ def get_schema(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
     }
 
 
+@router.get("/api/examples")
+def get_examples(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+    """Example queries generated from the live schema + statistics (never hardcoded)."""
+    from ...optimizer.examples import generate_examples
+
+    return {"examples": generate_examples(adapter)}
+
+
 @router.get("/api/schema/tables")
 def get_tables(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
     return {"tables": adapter.get_tables()}

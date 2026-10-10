@@ -28,8 +28,8 @@ class SqlRequest(BaseModel):
 
 class BenchmarkRequest(BaseModel):
     sql: str
-    warmup: int = 2
-    runs: int = 5
+    warmup: int | None = None   # None -> configured default (BENCHMARK_WARMUP)
+    runs: int | None = None     # None -> configured default (BENCHMARK_RUNS)
 
 
 class CopilotRequest(BaseModel):

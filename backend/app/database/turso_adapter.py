@@ -199,11 +199,13 @@ class TursoAdapter(DatabaseAdapter):
             most_common: list[tuple[Any, int]] = []
             # Only build a histogram of common values for low-cardinality columns
             # (avoids scanning huge distinct sets). Threshold is data-driven.
-            if 0 < distinct_count <= max(50, row_count // 20 + 1):
+            cfg = self._settings
+            cap = max(cfg.mcv_min_distinct_cap, int(row_count * cfg.mcv_distinct_ratio) + 1)
+            if 0 < distinct_count <= cap:
                 _, mc = self._rows(
                     f"SELECT {qc}, COUNT(*) AS c FROM {qt} "
                     f"WHERE {qc} IS NOT NULL GROUP BY {qc} "
-                    f"ORDER BY c DESC LIMIT 10"
+                    f"ORDER BY c DESC LIMIT {int(cfg.mcv_limit)}"
                 )
                 most_common = [(m[0], int(m[1])) for m in mc]
 
@@ -270,7 +272,11 @@ class TursoAdapter(DatabaseAdapter):
         cols, rows = self._rows(f"EXPLAIN {sql}")
         return [dict(zip(cols, r)) for r in rows]
 
-    def benchmark_query(self, sql: str, warmup: int = 2, runs: int = 5) -> dict:
+    def benchmark_query(
+        self, sql: str, warmup: Optional[int] = None, runs: Optional[int] = None
+    ) -> dict:
+        warmup = self._settings.benchmark_warmup if warmup is None else warmup
+        runs = self._settings.benchmark_runs if runs is None else runs
         # Warm-up runs are executed and discarded.
         for _ in range(max(0, warmup)):
             self.execute_readonly(sql)

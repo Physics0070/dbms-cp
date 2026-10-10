@@ -41,7 +41,23 @@ class Settings(BaseSettings):
     default_range_selectivity: float = 0.3333
     default_join_selectivity: float = 0.1
 
+    # --- Statistics collection ----------------------------------------------
+    mcv_limit: int = 10                  # most-common-values kept per column
+    mcv_min_distinct_cap: int = 50       # always histogram columns with <= this many distinct values
+    mcv_distinct_ratio: float = 0.05     # ...or <= this fraction of the row count
+
+    # --- Plan search --------------------------------------------------------
+    exhaustive_join_threshold: int = 6   # <= N relations: enumerate; > N: System-R DP
+    max_candidates: int = 12             # candidate plans returned to the client
+
+    # --- Benchmarking -------------------------------------------------------
+    benchmark_warmup: int = 2
+    benchmark_runs: int = 5
+    equivalence_row_cap: int = 50000     # max rows compared when verifying a rewrite
+
     # --- Misc ---------------------------------------------------------------
+    history_limit: int = 200
+    optimizer_version: str = "1.1.0"
     stats_cache_ttl: int = 300
     frontend_origin: str = "http://localhost:5173"
 

@@ -21,6 +21,29 @@ export interface Candidate {
   id: string; join_order: string[]; operators: string[]; join_operators: string[];
   estimated_rows: number; total_cost: number; plan: PlanNode;
 }
+export interface Example { label: string; kind: string; sql: string; }
+
+export interface OptimizedQuery {
+  status: "rewritten" | "no_change" | "unsupported" | "rejected" | "unverified" | "error";
+  original_sql: string;
+  sql: string | null;
+  rejected_sql?: string;
+  changes: { name: string; what: string; why: string; tradeoff: string }[];
+  reasons: string[];
+  original_order: string[];
+  join_order: string[];
+  estimated: { before_cost: number; after_cost: number; improvement_pct: number; note: string };
+  equivalence: {
+    checked: boolean; equal: boolean; original_rows?: number; optimized_rows?: number;
+    columns_match?: boolean; note: string;
+  } | null;
+  benchmark: {
+    original: any; optimized: any; median_change_pct: number;
+    verdict: "faster" | "slower" | "indistinguishable"; note: string; error?: string;
+  } | null;
+  turso_plan: string[] | null;
+}
+
 export interface OptimizeResult {
   sql: string; optimizer_version: string; database_backend: string; statistics_source: string;
   optimization_time_ms: number;
@@ -38,6 +61,7 @@ export interface OptimizeResult {
     overall: { before_cost: number; after_cost: number; improvement_pct: number };
   };
   explain: any;
+  optimized_query: OptimizedQuery;
   benchmark: any;
   index_advisor: { baseline_cost: number; recommendations: any[]; note: string } | null;
   summary: any;
@@ -65,6 +89,7 @@ export const api = {
   health: () => get<any>("/api/health"),
   config: () => get<any>("/api/config"),
   schema: () => get<SchemaResponse>("/api/schema"),
+  examples: () => get<{ examples: Example[] }>("/api/examples"),
   statistics: (table: string) => get<any>(`/api/statistics/${table}`),
   validate: (sql: string) => post<{ valid: boolean; message: string }>("/api/validate", { sql }),
   optimize: (sql: string, opts: { benchmark?: boolean; index_advisor?: boolean } = {}) =>

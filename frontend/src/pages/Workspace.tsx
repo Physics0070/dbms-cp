@@ -1,28 +1,13 @@
 import { useEffect, useState } from "react";
-import { api, fmt, OptimizeResult } from "../api";
-import { SqlEditor } from "../components/SqlEditor";
+import { api, fmt, OptimizeResult, OptimizedQuery } from "../api";
+import { SqlEditor, SqlView } from "../components/SqlEditor";
 import { PlanFlow, TreeNode, operatorColor } from "../components/PlanFlow";
 import { CostBarChart } from "../components/CostChart";
 import { Badge, CopyButton, Empty, ErrorNote, Loading, Panel, Segmented, Stat } from "../components/ui";
 import { useStore, ResultTab } from "../store";
 
-const EXAMPLES: { label: string; sql: string }[] = [
-  {
-    label: "3-table join + filter + sort",
-    sql: `SELECT c.name, o.total, oi.quantity
-FROM customers c
-JOIN orders o ON o.customer_id = c.customer_id
-JOIN order_items oi ON oi.order_id = o.order_id
-WHERE o.status = 'completed' AND c.country = 'India'
-ORDER BY o.total DESC`,
-  },
-  { label: "Selective filter (rare value)", sql: `SELECT * FROM orders WHERE status = 'refunded'` },
-  { label: "Common filter", sql: `SELECT * FROM orders WHERE status = 'completed'` },
-  { label: "Aggregation", sql: `SELECT status, COUNT(*) AS n FROM orders GROUP BY status ORDER BY n DESC` },
-];
-
 export default function Workspace() {
-  const { sql, setSql, runOptimize, loading, error, result, benchmark, setBenchmark, tab, setTab } = useStore();
+  const { sql, setSql, examples, runOptimize, loading, error, result, benchmark, setBenchmark, tab, setTab } = useStore();
   const [validation, setValidation] = useState<{ valid: boolean; message: string } | null>(null);
 
   async function validate() {
@@ -32,6 +17,7 @@ export default function Workspace() {
 
   const tabs: { id: ResultTab; label: string; badge?: any }[] = [
     { id: "summary", label: "Summary" },
+    { id: "optimized", label: "Optimized query", badge: result ? optBadge(result.optimized_query) : undefined },
     { id: "plan", label: "Plan" },
     { id: "candidates", label: "Candidates", badge: result?.optimization.candidates.length },
     { id: "rewrites", label: "Rewrites" },
@@ -60,8 +46,8 @@ export default function Workspace() {
               onChange={(e) => { if (e.target.value) { setSql(e.target.value); setValidation(null); } }}
               aria-label="Load an example query"
             >
-              <option value="">Examples…</option>
-              {EXAMPLES.map((ex) => <option key={ex.label} value={ex.sql}>{ex.label}</option>)}
+              <option value="">{examples.length ? "Examples from your schema…" : "No examples"}</option>
+              {examples.map((ex) => <option key={ex.label} value={ex.sql}>{ex.label}</option>)}
             </select>
             <CopyButton text={sql} label="Copy" />
           </div>
@@ -69,7 +55,7 @@ export default function Workspace() {
       >
         <SqlEditor value={sql} onChange={(v) => { setSql(v); setValidation(null); }} onRun={runOptimize} height={212} />
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button className="btn btn-primary" onClick={runOptimize} disabled={loading}>
+          <button className="btn btn-primary" onClick={runOptimize} disabled={loading || !sql.trim()}>
             {loading ? (<><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Optimizing…</>) : "⚡ Optimize"}
           </button>
           <button className="btn btn-ghost" onClick={validate} disabled={loading}>Validate</button>
@@ -109,6 +95,7 @@ export default function Workspace() {
         <div className="animate-slide-up space-y-4">
           <Segmented tabs={tabs} value={tab} onChange={setTab} />
           {tab === "summary" && <SummaryTab r={result} onJump={setTab} />}
+          {tab === "optimized" && <OptimizedTab r={result} />}
           {tab === "plan" && <PlanTab r={result} />}
           {tab === "candidates" && <CandidatesTab r={result} />}
           {tab === "rewrites" && <RewritesTab r={result} />}
@@ -216,6 +203,164 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border border-line bg-panel-2 py-2">
       <div className="text-2xs uppercase tracking-wide text-faint">{label}</div>
       <div className="mt-0.5 text-sm font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- Optimized query */
+function optBadge(o?: OptimizedQuery) {
+  if (!o) return undefined;
+  return o.status === "rewritten" ? "✓" : o.status === "no_change" ? "=" : "!";
+}
+
+function OptimizedTab({ r }: { r: OptimizeResult }) {
+  const o = r.optimized_query;
+  const { setSql, setTab } = useStore();
+  const [showTurso, setShowTurso] = useState(false);
+
+  if (!o || o.status === "error") {
+    return <Empty title="Unavailable">{o?.reasons?.join(" ") || "The optimized query could not be generated."}</Empty>;
+  }
+
+  if (o.status === "no_change" || o.status === "unsupported") {
+    const already = o.status === "no_change";
+    return (
+      <Panel title={<div className="flex items-center gap-2">
+        {already ? "Already optimal" : "Not rewritten"}
+        <Badge tone={already ? "ok" : "warn"}>{already ? "no change needed" : "unsupported"}</Badge>
+      </div>}>
+        <div className="space-y-3">
+          <ul className="space-y-1.5 text-sm">
+            {o.reasons.map((x, i) => (
+              <li key={i} className="flex gap-2"><span className={already ? "text-ok" : "text-warn"}>•</span><span className="text-muted">{x}</span></li>
+            ))}
+          </ul>
+          {already && r.index_advisor?.recommendations?.some((x: any) => x.improvement_pct > 0) && (
+            <button className="btn btn-ghost text-xs" onClick={() => setTab("index")}>See index suggestions →</button>
+          )}
+          <div>
+            <div className="label mb-1.5">Your query</div>
+            <SqlView sql={o.original_sql} maxHeight={220} />
+          </div>
+        </div>
+      </Panel>
+    );
+  }
+
+  if (o.status === "rejected" || o.status === "unverified") {
+    return (
+      <Panel title={<div className="flex items-center gap-2">Rewrite withheld <Badge tone="err">{o.status}</Badge></div>}>
+        <p className="text-sm text-muted">{o.reasons.join(" ")}</p>
+        <p className="mt-2 text-2xs text-faint">A rewrite is only shown as an optimization after the database confirms it returns the same rows.</p>
+        {o.rejected_sql && (
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-faint hover:text-ink">candidate SQL (not equivalent / not verified)</summary>
+            <div className="mt-2"><SqlView sql={o.rejected_sql} maxHeight={240} /></div>
+          </details>
+        )}
+      </Panel>
+    );
+  }
+
+  // status === "rewritten" (verified equivalent)
+  const eq = o.equivalence!;
+  const bm = o.benchmark && !o.benchmark.error ? o.benchmark : null;
+  const verdictTone = bm?.verdict === "faster" ? "ok" : bm?.verdict === "slower" ? "warn" : "neutral";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel px-4 py-3">
+        <Badge tone="ok">verified equivalent</Badge>
+        <span className="text-sm text-ink">
+          {eq.original_rows} row{eq.original_rows === 1 ? "" : "s"} from both queries — same columns, same rows.
+        </span>
+        <span className="text-2xs text-faint">{eq.note}</span>
+        <button className="btn btn-primary ml-auto !py-1 text-xs"
+          onClick={() => { setSql(o.sql!); setTab("summary"); }} title="Load the optimized SQL into the editor">
+          Use this query
+        </button>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title="Original" right={<CopyButton text={o.original_sql} />} bodyClass="p-3">
+          <SqlView sql={o.original_sql} />
+        </Panel>
+        <Panel title={<div className="flex items-center gap-2">Optimized <Badge tone="ok">rewritten</Badge></div>}
+          right={<CopyButton text={o.sql!} />} bodyClass="p-3">
+          <SqlView sql={o.sql!} />
+        </Panel>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title={<div className="flex items-center gap-2">Estimated {estChip}</div>}>
+          <div className="flex items-end gap-4">
+            <div>
+              <div className="label">cost before → after</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums">
+                {fmt(o.estimated.before_cost)} <span className="text-faint">→</span> {fmt(o.estimated.after_cost)}
+              </div>
+            </div>
+            <div className="ml-auto text-right">
+              <div className="label">estimated reduction</div>
+              <div className={`mt-1 text-2xl font-bold tabular-nums ${o.estimated.improvement_pct > 0 ? "text-ok" : "text-muted"}`}>
+                {fmt(o.estimated.improvement_pct)}%
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-2xs text-faint">{o.estimated.note}</p>
+        </Panel>
+
+        <Panel title={<div className="flex items-center gap-2">Measured {bm ? measuredChip : <Badge>unavailable</Badge>}</div>}>
+          {bm ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Stat label="Original median" value={`${fmt(bm.original.median_ms)}ms`} sub={`${fmt(bm.original.min_ms)}–${fmt(bm.original.max_ms)}ms`} />
+                <Stat label="Optimized median" value={`${fmt(bm.optimized.median_ms)}ms`} sub={`${fmt(bm.optimized.min_ms)}–${fmt(bm.optimized.max_ms)}ms`}
+                  tone={bm.verdict === "faster" ? "ok" : "default"} />
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Badge tone={verdictTone as any}>{bm.verdict === "indistinguishable" ? "no measurable difference" : bm.verdict}</Badge>
+                {bm.verdict !== "indistinguishable" && (
+                  <span className="tabular-nums text-muted">{fmt(Math.abs(bm.median_change_pct))}% {bm.median_change_pct >= 0 ? "lower" : "higher"} median</span>
+                )}
+              </div>
+              <p className="text-2xs text-faint">{bm.note}</p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted">Turn on <span className="font-medium text-ink">Benchmark execution</span> and re-run to time both queries on the same data.</p>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="What changed" bodyClass="p-0">
+        <ul className="divide-y divide-line">
+          {o.changes.map((c) => (
+            <li key={c.name} className="grid gap-1 px-4 py-3 text-sm md:grid-cols-[170px_1fr]">
+              <div className="font-semibold">{c.name}</div>
+              <div>
+                <p className="text-ink">{c.what}</p>
+                <p className="mt-1 text-muted"><span className="text-faint">Why: </span>{c.why}</p>
+                <p className="mt-0.5 text-2xs text-faint">Trade-off: {c.tradeoff}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+
+      {o.turso_plan && (
+        <div>
+          <button className="btn btn-subtle !px-0 text-xs" onClick={() => setShowTurso((v) => !v)}>
+            {showTurso ? "▾" : "▸"} Turso query plan for the optimized SQL
+          </button>
+          {showTurso && (
+            <ol className="mt-2 space-y-1">
+              {o.turso_plan.map((d, i) => (
+                <li key={i} className="rounded-md bg-panel-2 px-2.5 py-1.5 font-mono text-2xs text-muted">{d}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
     </div>
   );
 }

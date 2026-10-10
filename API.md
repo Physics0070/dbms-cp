@@ -21,6 +21,11 @@ Non-secret cost-model constants and selectivity defaults.
 Full schema: every table with columns, primary key, indexes, foreign keys, row counts,
 plus discovered `relationships`.
 
+### `GET /api/examples`
+Example queries **generated from the live schema and statistics** (joins from foreign keys,
+filters from most-common-value histograms, aggregates from low-cardinality columns) —
+never hardcoded. `{ "examples": [ { label, kind, sql } ] }`.
+
 ### `GET /api/schema/tables`
 `{ "tables": [...] }`
 
@@ -39,8 +44,20 @@ Computed statistics (row count, per-column distinct/null/min/max/MCV, `collected
 ```
 Returns the full pipeline result: `relational_algebra`, `cardinality`, `optimization`
 (`selected` + `candidates` + `reason`), `logical_optimization` (before/after trees +
-transformations), `explain` (Turso comparison), `benchmark`, `index_advisor`, `summary`,
-and a `history_id`. `400` for non-read-only SQL.
+transformations), `explain` (Turso comparison), `optimized_query`, `benchmark`,
+`index_advisor`, `summary`, and a `history_id`. `400` for non-read-only SQL.
+
+`optimized_query.status` is one of:
+- `rewritten` — a reconstructed SQL (`sql`) that changes join order and/or pushes predicates
+  down. It is only returned after the database confirms it yields the same columns and the
+  same multiset of rows (`equivalence`). When `benchmark` is requested, both queries are timed
+  and `benchmark.verdict` is `faster`/`slower` only if the measured ranges do not overlap,
+  otherwise `indistinguishable`. `estimated` carries cost-model numbers and is labelled as such.
+- `no_change` — the query is already in its best form (reasons given).
+- `unsupported` — outer joins, subqueries, set operations, `LIMIT/OFFSET` or unresolved
+  columns, where a rewrite is not provably safe.
+- `rejected` / `unverified` — a candidate rewrite failed (or could not complete) verification
+  and is withheld from the optimized output.
 
 ### `POST /api/validate`
 `{ "sql": "..." }` → `{ "valid": bool, "message": str }`.

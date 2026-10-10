@@ -13,8 +13,6 @@ from typing import Iterator, Optional
 
 from .physical_plans import PhysicalPlan, PhysicalPlanner
 
-EXHAUSTIVE_THRESHOLD = 6  # <= this many relations -> exhaustive enumeration
-
 
 @dataclass
 class CandidatePlan:
@@ -77,11 +75,13 @@ class JoinOptimizer:
         return bool(self.adj.get(alias, set()) & subset)
 
     # -- optimize ------------------------------------------------------------
-    def optimize(self, max_candidates: int = 12) -> OptimizationResult:
+    def optimize(self, max_candidates: Optional[int] = None) -> OptimizationResult:
+        cfg = self.planner.cfg
+        max_candidates = cfg.max_candidates if max_candidates is None else max_candidates
         n = len(self.aliases)
         if n <= 1:
             return self._single_relation_result()
-        if n <= EXHAUSTIVE_THRESHOLD:
+        if n <= cfg.exhaustive_join_threshold:
             return self._exhaustive(max_candidates)
         return self._dynamic_programming()
 
@@ -101,10 +101,12 @@ class JoinOptimizer:
         )
 
     def _iter_connected_orders(self) -> Iterator[list[str]]:
-        aliases = set(self.aliases)
+        # Ordered lists (never sets): enumeration must be deterministic so that cost ties
+        # resolve to the written order instead of depending on Python's per-process hash
+        # seed. The sort in `_exhaustive` is stable, so the first-enumerated order wins ties.
         has_edges = any(self.adj[a] for a in self.aliases)
 
-        def extend(prefix: list[str], remaining: set[str]):
+        def extend(prefix: list[str], remaining: list[str]):
             if not remaining:
                 yield list(prefix)
                 return
@@ -114,10 +116,10 @@ class JoinOptimizer:
             candidates = connected if connected else list(remaining)
             for r in candidates:
                 prefix.append(r)
-                yield from extend(prefix, remaining - {r})
+                yield from extend(prefix, [x for x in remaining if x != r])
                 prefix.pop()
 
-        yield from extend([], aliases)
+        yield from extend([], list(self.aliases))
 
     def _exhaustive(self, max_candidates: int) -> OptimizationResult:
         candidates: list[CandidatePlan] = []

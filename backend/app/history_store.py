@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .config import get_settings
+
 _LOCK = threading.Lock()
 _HISTORY_PATH = Path(__file__).resolve().parent.parent / "query_history.json"
 
@@ -43,7 +45,7 @@ def add(result: dict) -> dict:
             "result": result,  # full snapshot so it can be reopened
         }
         items.insert(0, record)
-        items = items[:200]  # keep it bounded
+        items = items[: get_settings().history_limit]  # keep it bounded
         _save(items)
         return record
 

@@ -81,7 +81,21 @@ before/after cost + improvement %.
   reports the cost delta and affected operator. No index is created unless explicitly
   confirmed.
 
-## 8. AI explanation (`copilot.py`)
+## 8. Optimized-query reconstruction (`rewriter.py`)
+
+From the chosen join order the rewriter re-emits SQL (via the `sqlglot` AST) that joins in
+that order, moves single-relation predicates into the relation they filter, and narrows each
+relation to the columns the rest of the query uses. It deliberately declines anything that
+could change results: outer joins, subqueries/CTEs/set operations, `LIMIT/OFFSET`, unresolved
+columns; `SELECT *` pins the join order because it fixes output column order. A projection-only
+rewrite is not reported as an optimization (no cost-model effect; SQLite flattens subqueries).
+
+A rewrite is never shown on trust: `verify_equivalent` executes both queries and compares
+columns and the multiset of rows (row order is not compared). Timing comparisons only claim
+"faster/slower" when the measured min–max ranges do not overlap. Join enumeration is
+deterministic (ties resolve to the written order), so results do not vary between runs.
+
+## 9. AI explanation (`copilot.py`)
 
 The copilot receives only the structured optimizer output and is instructed to use
 nothing else. Without an OpenAI key it produces a deterministic explanation from the

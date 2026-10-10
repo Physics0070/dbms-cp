@@ -12,7 +12,7 @@ settings = get_settings()
 app = FastAPI(
     title="AI-Powered Cost-Based SQL Query Optimizer",
     description="A schema-agnostic, cost-based SQL optimizer & performance analyzer over Turso/libSQL.",
-    version="1.0.0",
+    version=settings.optimizer_version,
 )
 
 app.add_middleware(
@@ -46,7 +46,7 @@ def health() -> dict:
 def config() -> dict:
     """Non-secret configuration surfaced to the dashboard (never exposes secrets)."""
     return {
-        "optimizer_version": "1.0.0",
+        "optimizer_version": settings.optimizer_version,
         "cost_model": {
             "cost_io_per_page": settings.cost_io_per_page,
             "cost_cpu_per_row": settings.cost_cpu_per_row,

@@ -16,7 +16,7 @@ function escapeHtml(s: string): string {
 // inside them aren't recolored.
 const TOKEN = /(--[^\n]*|\/\*[\s\S]*?\*\/)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)|([=<>!+\-*/%|]+)|([(),.;])/g;
 
-function highlight(code: string): string {
+export function highlight(code: string): string {
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
@@ -38,6 +38,17 @@ function highlight(code: string): string {
   out += escapeHtml(code.slice(last));
   // trailing newline keeps the <pre> height in sync with the textarea
   return out + "\n";
+}
+
+/** Read-only, highlighted SQL block. Content is HTML-escaped by `highlight`. */
+export function SqlView({ sql, maxHeight = 360 }: { sql: string; maxHeight?: number }) {
+  return (
+    <pre
+      className="sqled-shared overflow-auto rounded-lg border border-line bg-panel-2"
+      style={{ maxHeight }}
+      dangerouslySetInnerHTML={{ __html: highlight(sql) }}
+    />
+  );
 }
 
 export function SqlEditor({
