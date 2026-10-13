@@ -10,7 +10,12 @@ from pathlib import Path
 from .config import get_settings
 
 _LOCK = threading.Lock()
-_HISTORY_PATH = Path(__file__).resolve().parent.parent / "query_history.json"
+def _default_path() -> Path:
+    configured = get_settings().history_path.strip()
+    return Path(configured) if configured else Path(__file__).resolve().parent.parent / "query_history.json"
+
+
+_HISTORY_PATH = _default_path()
 
 
 def _load() -> list[dict]:

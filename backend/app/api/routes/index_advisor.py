@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ...database.turso_adapter import TursoAdapter
+from ...database.sqlite_adapter import SqliteAdapter
 from ...optimizer.index_advisor import IndexAdvisor
 from ...optimizer.parser import parse_query
 from ...optimizer.safety import UnsafeQueryError
@@ -26,7 +26,7 @@ class CreateIndexRequest(BaseModel):
 
 
 @router.post("/api/index-advisor")
-def advise(req: SqlRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def advise(req: SqlRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     try:
         schema = adapter.get_schema()
         parsed = parse_query(req.sql, schema)
@@ -39,7 +39,7 @@ def advise(req: SqlRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dic
 
 
 @router.post("/api/index/create")
-def create_index(req: CreateIndexRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def create_index(req: CreateIndexRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     # This is the ONLY write path exposed, and only when the user explicitly confirms.
     if not req.confirm:
         raise HTTPException(
@@ -48,6 +48,8 @@ def create_index(req: CreateIndexRequest, adapter: TursoAdapter = Depends(adapte
         )
     try:
         ddl = adapter.create_index(req.table, req.columns, req.unique)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

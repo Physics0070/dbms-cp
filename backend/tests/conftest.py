@@ -15,20 +15,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import get_settings  # noqa: E402
-from app.database.turso_adapter import TursoAdapter  # noqa: E402
+from app.database.sqlite_adapter import SqliteAdapter  # noqa: E402
 from seed.generate import seed_ecommerce, seed_library  # noqa: E402
 
 
-def _make_adapter(db_path: Path) -> TursoAdapter:
-    os.environ["TURSO_DATABASE_URL"] = ""
-    os.environ["LOCAL_DB_PATH"] = str(db_path)
-    get_settings.cache_clear()
-    return TursoAdapter()
+def _make_adapter(db_path: Path) -> SqliteAdapter:
+    return SqliteAdapter(str(db_path))
 
 
 @pytest.fixture(scope="session")
-def ecommerce_adapter(tmp_path_factory) -> TursoAdapter:
+def ecommerce_adapter(tmp_path_factory) -> SqliteAdapter:
     db = tmp_path_factory.mktemp("ec") / "ecommerce.db"
     conn = sqlite3.connect(db)
     seed_ecommerce(conn, seed=7, customer_count=300, order_count=1200, product_count=150)
@@ -37,7 +33,7 @@ def ecommerce_adapter(tmp_path_factory) -> TursoAdapter:
 
 
 @pytest.fixture(scope="session")
-def library_adapter(tmp_path_factory) -> TursoAdapter:
+def library_adapter(tmp_path_factory) -> SqliteAdapter:
     db = tmp_path_factory.mktemp("lib") / "library.db"
     conn = sqlite3.connect(db)
     seed_library(conn, seed=7, scale=1)

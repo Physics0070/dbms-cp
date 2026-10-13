@@ -17,7 +17,7 @@ from ..config import get_settings
 SYSTEM_PROMPT = (
     "You are a database query-optimization assistant embedded in a teaching tool. "
     "You are given ONLY structured output produced by a cost-based SQL optimizer running "
-    "on a Turso/libSQL database. Explain the results clearly for a student. "
+    "on a SQLite database. Explain the results clearly for a student. "
     "Rules:\n"
     "- Use ONLY the supplied optimizer data. Never invent numbers, tables, indexes, or costs.\n"
     "- If a piece of information is not present in the data, say it is unavailable.\n"
@@ -47,7 +47,7 @@ def build_context(payload: dict) -> dict:
             {k: t.get(k) for k in ("name", "improvement_pct", "before_cost", "after_cost")}
             for t in payload.get("logical_optimization", {}).get("transformations", [])
         ],
-        "turso_explain": payload.get("explain", {}).get("turso"),
+        "engine_explain": payload.get("explain", {}).get("engine"),
         "explain_differences": payload.get("explain", {}).get("differences"),
         "benchmark": payload.get("benchmark"),
         "index_recommendations": [
@@ -95,19 +95,20 @@ def _call_openai(api_key: str, model: str, context: dict, question: Optional[str
         user += f"\n\nUser question: {question}\nAnswer using only the data above."
     else:
         user += "\n\nExplain the selected plan, its cost drivers, the join order, the logical " \
-                "optimizations applied, how it compares to the Turso query plan, and any index advice."
+                "optimizations applied, how it compares to SQLite's own query plan, and any index advice."
+    cfg = get_settings()
     resp = httpx.post(
-        "https://api.openai.com/v1/chat/completions",
+        cfg.openai_api_url,
         headers={"Authorization": f"Bearer {api_key}"},
         json={
             "model": model,
-            "temperature": 0.2,
+            "temperature": cfg.openai_temperature,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user},
             ],
         },
-        timeout=45.0,
+        timeout=cfg.openai_timeout_s,
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"].strip()
@@ -147,15 +148,15 @@ def _offline_explanation(context: dict, question: Optional[str]) -> str:
     else:
         lines.append("- No logical transformation data available.")
 
-    lines.append("\n### Turso EXPLAIN QUERY PLAN comparison")
+    lines.append("\n### SQLite EXPLAIN QUERY PLAN comparison")
     diffs = context.get("explain_differences")
     if diffs:
         for d in diffs:
             lines.append(f"- {d}")
-    elif context.get("turso_explain"):
-        lines.append("- The custom plan and Turso's plan agree on tables, index usage and sorting.")
+    elif context.get("engine_explain"):
+        lines.append("- The custom plan and SQLite's plan agree on tables, index usage and sorting.")
     else:
-        lines.append("- Turso EXPLAIN data is unavailable.")
+        lines.append("- SQLite EXPLAIN data is unavailable.")
 
     lines.append("\n### Application benchmark")
     bench = context.get("benchmark")

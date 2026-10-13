@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { api, Example, OptimizeResult } from "./api";
 
 export type ResultTab =
-  | "summary" | "optimized" | "plan" | "candidates" | "rewrites" | "turso" | "index" | "copilot";
+  | "summary" | "optimized" | "plan" | "candidates" | "rewrites" | "engine" | "index" | "copilot";
 
 interface Store {
   sql: string;

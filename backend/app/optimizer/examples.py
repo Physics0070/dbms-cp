@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from ..config import get_settings
 from ..database.adapter import DatabaseAdapter, TableSchema
 
 
@@ -51,7 +52,8 @@ def _fk_edges(schema: dict[str, TableSchema]) -> list[tuple[str, list[str], str,
     return edges
 
 
-def generate_examples(adapter: DatabaseAdapter, limit: int = 6) -> list[dict]:
+def generate_examples(adapter: DatabaseAdapter, limit: Optional[int] = None) -> list[dict]:
+    limit = get_settings().example_limit if limit is None else limit
     schema = adapter.get_schema()
     edges = _fk_edges(schema)
     out: list[dict] = []
@@ -131,6 +133,60 @@ def generate_examples(adapter: DatabaseAdapter, limit: int = 6) -> list[dict]:
             "multi-join",
         )
 
+        # Same three tables, but written the way people often write it: the largest table
+        # first, with the only filter on the smallest one. A good optimizer should move the
+        # filtered table to the front, so this is the example that exercises the rewriter.
+        rows = {t: adapter.get_statistics(t).row_count for t in tables}
+        big = max(tables, key=lambda t: rows[t])
+        small_first = sorted((t for t in tables if t != big), key=lambda t: rows[t])
+        # One filter per smaller table on a categorical column: never a join key (that could
+        # contradict the join) and never a near-unique column. Selective values make the
+        # reorder worthwhile; the query is run first so it never returns an empty result,
+        # which would make the equivalence check compare two empty sets.
+        join_cols: dict[str, set[str]] = {t: set() for t in tables}
+        for (t_from, cc, t_to, rc) in (e1, e2):
+            join_cols[t_from].update(cc)
+            join_cols[t_to].update(rc)
+        picks = []
+        for t in small_first:
+            st_t = adapter.get_statistics(t)
+            cands = [
+                (cs.distinct_count, col, cs) for col, cs in st_t.columns.items()
+                if col not in schema[t].primary_key and col not in join_cols[t]
+                and len(cs.most_common) >= 2 and cs.distinct_count < st_t.row_count
+            ]
+            if cands:
+                _, col, cs = min(cands, key=lambda c: c[0])
+                picks.append((t, col, cs.most_common))
+
+        if picks:
+            # Order the chain so each JOIN has its ON condition available: start at `big`,
+            # then walk the path (first - mid - last) away from it.
+            line = [first, mid, last]
+            seq = line if big == first else line[::-1] if big == last else [mid, first, last]
+            parts = [f"FROM {_q(seq[0])} {al[seq[0]]}"]
+            edge_for = {frozenset((e[0], e[2])): e for e in (e1, e2)}
+            seen = {seq[0]}
+            for t in seq[1:]:
+                link = next(e for k, e in edge_for.items() if t in k and (k - {t}) <= seen)
+                parts.append(f"JOIN {_q(t)} {al[t]} ON {on(link)}")
+                seen.add(t)
+
+            # Try selective values first (that is where reordering pays off); fall back to
+            # common values; only offer a query that actually returns rows.
+            for use_rare in (True, False):
+                where = " AND ".join(
+                    f"{al[t]}.{_q(c)} = {_literal(mc[-1][0] if use_rare else mc[0][0])}" for t, c, mc in picks
+                )
+                candidate = f"SELECT {sel}\n" + "\n".join(parts) + f"\nWHERE {where}"
+                try:
+                    _, got = adapter.execute_readonly(candidate, limit=1)
+                except Exception:
+                    got = []
+                if got:
+                    add(f"Filtered 3-way join, largest table first ({big})", candidate, "reorderable")
+                    break
+
     # --- selective vs. common filter on the same column ----------------------
     biggest = max(schema, key=lambda t: adapter.get_statistics(t).row_count, default=None)
     if biggest:
@@ -155,7 +211,7 @@ def generate_examples(adapter: DatabaseAdapter, limit: int = 6) -> list[dict]:
             seen.add(ex["sql"])
             uniq.append(ex)
     # put the richest query first so it becomes the default
-    rank = {"multi-join": 0, "join": 1, "selective": 2, "common": 3, "aggregate": 4}
+    rank = {"reorderable": 0, "multi-join": 1, "join": 2, "selective": 3, "common": 4, "aggregate": 5}
     uniq.sort(key=lambda e: rank.get(e["kind"], 9))
     if not uniq and schema:
         t = next(iter(schema))

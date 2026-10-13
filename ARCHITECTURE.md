@@ -24,10 +24,10 @@
                                                 │
                                    ┌────────────▼────────────┐
                                    │  DatabaseAdapter (ABC)  │  app/database/adapter.py
-                                   │  TursoAdapter (impl)    │  app/database/turso_adapter.py
+                                   │  SqliteAdapter (impl)   │  app/database/sqlite_adapter.py
                                    └────────────┬────────────┘
                                                 │
-                                        Turso / libSQL / SQLite
+                                        any SQLite database file
 ```
 
 **Key rule:** the optimizer depends only on the `DatabaseAdapter` abstraction. Swapping
@@ -43,7 +43,7 @@ backend/
     history_store.py          # JSON-backed query history (app metadata only)
     database/
       adapter.py              # abstract interface + schema/stat value objects
-      turso_adapter.py        # libSQL/SQLite implementation (schema, stats, explain, benchmark)
+      sqlite_adapter.py       # SQLite implementation (schema, stats, explain, benchmark, runtime switching)
     optimizer/
       safety.py               # read-only AST validation
       relational_algebra.py   # RA nodes + predicate expression model
@@ -54,14 +54,16 @@ backend/
       cost_model.py           # explicit, documented cost formulas
       physical_plans.py       # access paths + join algorithms + costing
       join_optimizer.py       # join-order search (exhaustive + DP)
-      transformations.py      # predicate/projection pushdown, join reorder
+      transformations.py      # predicate/projection pushdown, join reorder (analysis + costing)
+      rewriter.py             # verified join-order rewrite, equivalence + benchmark comparison
+      examples.py             # example queries generated from the live schema
       index_advisor.py        # what-if hypothetical index analysis
       explain_parser.py       # EXPLAIN QUERY PLAN parsing + comparison
       copilot.py              # AI explanation (OpenAI + offline fallback)
       orchestrator.py         # end-to-end pipeline
     api/
       deps.py
-      routes/{schema,optimize,index_advisor,history}.py
+      routes/{database,schema,optimize,index_advisor,history}.py
   seed/generate.py            # deterministic demo-data generator (+ 2nd schema)
   tests/                      # pytest suite (both schemas)
 
@@ -84,7 +86,7 @@ frontend/
    enumerates join orders and selects the lowest-cost plan.
 6. `LogicalOptimizer` produces before/after trees and quantifies predicate
    pushdown, projection pushdown and join reordering.
-7. `adapter.explain_query` + `explain_parser.compare` compare against Turso's plan.
+7. `adapter.explain_query` + `explain_parser.compare` compare against SQLite's own plan.
 8. Optional `adapter.benchmark_query` measures real execution time.
 9. `IndexAdvisor` simulates hypothetical indexes and re-costs.
 10. The structured result is returned (and saved to history). The AI copilot can

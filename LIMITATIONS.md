@@ -32,7 +32,7 @@
   `ORDER BY`, aliases, basic expressions. Subqueries, `HAVING`, `UNION`, window
   functions and `LIMIT`-aware costing are out of scope for the core.
 
-**Turso/SQLite specifics**
+**SQLite specifics**
 - SQLite has no `EXPLAIN ANALYZE`; runtime is measured by application-level benchmarking,
   which includes client/round-trip overhead and is **not** comparable to optimizer cost.
 - `EXPLAIN` bytecode is exposed for inspection but not deeply interpreted.

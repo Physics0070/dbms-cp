@@ -1,9 +1,9 @@
 # Statistics & Selectivity
 
-Because SQLite/libSQL does not expose PostgreSQL-style catalog statistics, we compute
+Because SQLite does not expose PostgreSQL-style catalog statistics, we compute
 our own **from the live data** with plain SQL aggregates. Nothing is hardcoded.
 
-## What is collected (`turso_adapter._compute_statistics`)
+## What is collected (`sqlite_adapter._compute_statistics`)
 
 For each table:
 - `row_count` — `SELECT COUNT(*)`.
@@ -28,7 +28,7 @@ WHERE col IS NOT NULL GROUP BY col ORDER BY c DESC LIMIT 10;
 Identifiers are validated and double-quoted before interpolation, so schema-derived
 names cannot cause injection.
 
-Every statistics payload is labelled **"Computed from Turso database"** with a UTC
+Every statistics payload is labelled **"Computed from the connected database"** with a UTC
 `collected_at` timestamp, and is cached for `STATS_CACHE_TTL` seconds.
 
 ## Selectivity engine (`selectivity.py`)

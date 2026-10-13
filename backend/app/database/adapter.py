@@ -1,6 +1,6 @@
 """Database abstraction layer.
 
-The optimizer depends *only* on this interface, never on Turso/libSQL directly.
+The optimizer depends *only* on this interface, never on a specific engine directly.
 Swapping databases means writing a new adapter, not touching the optimizer.
 """
 from __future__ import annotations
@@ -92,7 +92,7 @@ class TableStatistics:
     row_count: int
     columns: dict[str, ColumnStatistics]
     collected_at: str
-    source: str = "Computed from Turso database"
+    source: str = "Computed from the connected database"
 
     def to_dict(self) -> dict:
         return {

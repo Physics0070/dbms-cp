@@ -185,6 +185,11 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
 }
 .sqled-ta::selection { background: var(--accent-soft); }
 
+/* diff marks in the read-only SQL view */
+.dl { margin: 0 -16px; padding: 0 16px; border-left: 2px solid transparent; }
+.dl-add { background: var(--ok-soft); border-left-color: var(--ok); }
+.dl-del { background: var(--err-soft); border-left-color: var(--err); }
+
 .tok-kw   { color: #7aa2ff; font-weight: 600; }
 .tok-fn   { color: #56c7c7; }
 .tok-str  { color: #8fd17a; }

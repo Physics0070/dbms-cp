@@ -1,24 +1,24 @@
-"""Turso / libSQL adapter.
+"""SQLite adapter.
 
-Implements :class:`DatabaseAdapter` using SQLite-compatible metadata mechanisms
-(`sqlite_master`, `PRAGMA table_info`, `PRAGMA index_list`, `PRAGMA index_info`,
-`PRAGMA foreign_key_list`) and SQLite `EXPLAIN QUERY PLAN` / `EXPLAIN`.
+Implements :class:`DatabaseAdapter` for any SQLite database file using SQLite's own
+metadata mechanisms (`sqlite_master`, `PRAGMA table_info`, `PRAGMA index_list`,
+`PRAGMA index_info`, `PRAGMA foreign_key_list`) and `EXPLAIN QUERY PLAN` / `EXPLAIN`.
 
-Connection strategy:
-  * If TURSO_DATABASE_URL is set  -> remote libSQL via the `libsql` client.
-  * Otherwise                     -> a local libSQL/SQLite file (dev & tests).
+The optimizer talks to the :class:`DatabaseAdapter` interface only, so supporting another
+engine means writing another adapter. This one is deliberately file-agnostic: nothing here
+knows a table or column name, and the connected file can be switched at runtime.
 
-libSQL is SQLite-compatible, so when the `libsql` client is unavailable we fall
-back to Python's stdlib `sqlite3` for the local file. No optimizer code changes.
+Safety: files are opened **read-only** unless `ALLOW_INDEX_CREATION=true`, so an analysis
+session cannot modify the database it inspects.
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 import statistics as _stats
+import threading
 import time
 from datetime import datetime, timezone
-from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
 
 from ..config import get_settings
@@ -32,58 +32,72 @@ from .adapter import (
     TableStatistics,
 )
 
-try:  # pragma: no cover - exercised only when the client is installed
-    import libsql_experimental as libsql  # type: ignore
-    _HAS_LIBSQL = True
-except Exception:  # pragma: no cover
-    libsql = None  # type: ignore
-    _HAS_LIBSQL = False
+_SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
-_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+class DatabaseUnavailable(RuntimeError):
+    """The configured/requested database cannot be opened."""
 
 
 def _quote_ident(name: str) -> str:
-    """Safely quote an identifier discovered from the schema."""
-    if not isinstance(name, str) or not _IDENT_RE.match(name):
+    """Quote an identifier discovered from the schema (escapes embedded quotes)."""
+    if not isinstance(name, str) or not name or "\x00" in name:
         raise ValueError(f"Unsafe SQL identifier: {name!r}")
-    return f'"{name}"'
+    return '"' + name.replace('"', '""') + '"'
 
 
-class TursoAdapter(DatabaseAdapter):
-    def __init__(self) -> None:
+def validate_sqlite_file(path: str) -> Path:
+    p = Path(path).expanduser()
+    if not p.is_file():
+        raise DatabaseUnavailable(f"Database file not found: {path}")
+    try:
+        with open(p, "rb") as fh:
+            header = fh.read(16)
+    except OSError as e:
+        raise DatabaseUnavailable(f"Cannot read database file: {e}") from e
+    if header != _SQLITE_MAGIC:
+        raise DatabaseUnavailable(f"Not a SQLite database file: {path}")
+    return p.resolve()
+
+
+class SqliteAdapter(DatabaseAdapter):
+    def __init__(self, path: str) -> None:
         self._settings = get_settings()
+        self.path = validate_sqlite_file(path)
+        # FastAPI runs sync endpoints in a thread pool, and statements here toggle
+        # connection-level PRAGMAs, so every use of the shared connection is serialized.
+        self._lock = threading.RLock()
         self._conn = self._connect()
         self._stats_cache: dict[str, tuple[float, TableStatistics]] = {}
 
     # -- connection ----------------------------------------------------------
     def _connect(self):
-        s = self._settings
-        if s.use_remote and _HAS_LIBSQL:
-            return libsql.connect(
-                database=s.local_db_path,
-                sync_url=s.turso_database_url,
-                auth_token=s.turso_auth_token,
-            )
-        if _HAS_LIBSQL:
-            return libsql.connect(s.local_db_path)
-        conn = sqlite3.connect(s.local_db_path, check_same_thread=False)
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        try:
+            if self._settings.allow_index_creation:
+                conn = sqlite3.connect(str(self.path), check_same_thread=False)
+            else:
+                conn = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True, check_same_thread=False)
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")  # fails fast on a corrupt file
+            return conn
+        except sqlite3.Error as e:
+            raise DatabaseUnavailable(f"Could not open database: {e}") from e
 
     @property
     def backend_name(self) -> str:
-        if self._settings.use_remote and _HAS_LIBSQL:
-            return "Turso (remote libSQL)"
-        if _HAS_LIBSQL:
-            return "libSQL (local file)"
-        return "SQLite (local file, libSQL-compatible)"
+        mode = "read-write" if self._settings.allow_index_creation else "read-only"
+        return f"SQLite · {self.path.name} ({mode})"
+
+    @property
+    def read_only(self) -> bool:
+        return not self._settings.allow_index_creation
 
     def _rows(self, sql: str, params: Optional[list] = None) -> tuple[list[str], list[tuple]]:
-        cur = self._conn.execute(sql, params or [])
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description] if cur.description else []
-        return cols, [tuple(r) for r in rows]
+        with self._lock:
+            cur = self._conn.execute(sql, params or [])
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description] if cur.description else []
+            return cols, [tuple(r) for r in rows]
 
     # -- schema discovery ----------------------------------------------------
     def get_tables(self) -> list[str]:
@@ -238,18 +252,20 @@ class TursoAdapter(DatabaseAdapter):
         self, sql: str, params: Optional[list] = None, limit: Optional[int] = None
     ) -> tuple[list[str], list[tuple]]:
         # Defence in depth: the safety validator gates callers, but we also set
-        # query_only so the engine itself refuses writes.
-        try:
-            self._conn.execute("PRAGMA query_only = ON")
-        except Exception:
-            pass
-        try:
-            cols, rows = self._rows(sql, params)
-        finally:
+        # query_only so the engine itself refuses writes. The lock keeps the PRAGMA
+        # toggle from interleaving with other requests on the shared connection.
+        with self._lock:
             try:
-                self._conn.execute("PRAGMA query_only = OFF")
-            except Exception:
+                self._conn.execute("PRAGMA query_only = ON")
+            except sqlite3.Error:
                 pass
+            try:
+                cols, rows = self._rows(sql, params)
+            finally:
+                try:
+                    self._conn.execute("PRAGMA query_only = OFF")
+                except sqlite3.Error:
+                    pass
         if limit is not None:
             rows = rows[:limit]
         return cols, rows
@@ -304,29 +320,19 @@ class TursoAdapter(DatabaseAdapter):
             "samples_ms": [round(d, 4) for d in durations_ms],
         }
 
-    # -- write path (seed generator ONLY — never exposed to the API) ---------
-    def executescript_write(self, script: str) -> None:
-        self._conn.executescript(script)
-        self._conn.commit()
-
-    def execute_write(self, sql: str, params: Optional[list] = None) -> None:
-        self._conn.execute(sql, params or [])
-
-    def executemany_write(self, sql: str, seq: list) -> None:
-        self._conn.executemany(sql, seq)
-
-    def commit(self) -> None:
-        self._conn.commit()
-
     # -- explicit index creation (opt-in; validated identifiers only) ---------
     def create_index(self, table: str, columns: list[str], unique: bool = False) -> str:
-        """Create a real index — ONLY called when the user explicitly opts in.
+        """Create a real index — only when ALLOW_INDEX_CREATION is enabled.
 
-        All identifiers are validated to prevent injection, and the table/columns
-        must exist in the discovered schema.
+        The database is otherwise opened read-only. Identifiers are escaped, and the
+        table/columns must exist in the discovered schema.
         """
-        existing_tables = set(self.get_tables())
-        if table not in existing_tables:
+        if self.read_only:
+            raise PermissionError(
+                "Index creation is disabled: the database is opened read-only. "
+                "Set ALLOW_INDEX_CREATION=true and restart to enable it."
+            )
+        if table not in set(self.get_tables()):
             raise ValueError(f"Unknown table: {table!r}")
         table_cols = {c.name for c in self.get_columns(table)}
         for col in columns:
@@ -334,18 +340,49 @@ class TursoAdapter(DatabaseAdapter):
                 raise ValueError(f"Unknown column {col!r} on table {table!r}")
         qcols = ", ".join(_quote_ident(c) for c in columns)
         idx_name = f"idx_{table}_{'_'.join(columns)}"
-        _quote_ident(idx_name)  # validate generated name
         uniq = "UNIQUE " if unique else ""
         ddl = (
             f"CREATE {uniq}INDEX IF NOT EXISTS {_quote_ident(idx_name)} "
             f"ON {_quote_ident(table)} ({qcols})"
         )
-        self._conn.execute(ddl)
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(ddl)
+            self._conn.commit()
         self.invalidate_stats(table)
         return ddl
 
 
-@lru_cache
-def get_adapter() -> TursoAdapter:
-    return TursoAdapter()
+# ---------------------------------------------------------------------------
+# The currently connected database (switchable at runtime).
+# ---------------------------------------------------------------------------
+_CURRENT: Optional[SqliteAdapter] = None
+_CURRENT_LOCK = threading.Lock()
+
+
+def get_adapter() -> SqliteAdapter:
+    """Return the connected adapter, opening the configured default on first use."""
+    global _CURRENT
+    with _CURRENT_LOCK:
+        if _CURRENT is None:
+            _CURRENT = SqliteAdapter(get_settings().database_path)
+        return _CURRENT
+
+
+def connect_database(path: str) -> SqliteAdapter:
+    """Validate and switch to another SQLite file; the previous one stays if this fails.
+
+    The old adapter is not closed explicitly: requests already running on it must be able
+    to finish. Its connection is released once nothing references it any more.
+    """
+    global _CURRENT
+    new = SqliteAdapter(path)
+    with _CURRENT_LOCK:
+        _CURRENT = new
+    return new
+
+
+def set_adapter(adapter: Optional[SqliteAdapter]) -> None:
+    """Install an adapter directly (used by tests)."""
+    global _CURRENT
+    with _CURRENT_LOCK:
+        _CURRENT = adapter

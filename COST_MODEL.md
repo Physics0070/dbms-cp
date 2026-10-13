@@ -3,7 +3,7 @@
 This is an **explicit, educational** cost model, deliberately independent of SQLite's
 own planner. It expresses cost in abstract units that combine estimated **I/O** and
 **CPU** work (and, where relevant, **memory**). It never copies a cost value from
-SQLite/libSQL.
+SQLite.
 
 All constants come from configuration (`config.py` / `.env`) — there are no magic
 numbers embedded in the logic.

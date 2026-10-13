@@ -26,13 +26,17 @@ export interface Example { label: string; kind: string; sql: string; }
 export interface OptimizedQuery {
   status: "rewritten" | "no_change" | "unsupported" | "rejected" | "unverified" | "error";
   original_sql: string;
+  original_pretty: string;
   sql: string | null;
   rejected_sql?: string;
   changes: { name: string; what: string; why: string; tradeoff: string }[];
   reasons: string[];
   original_order: string[];
   join_order: string[];
-  estimated: { before_cost: number; after_cost: number; improvement_pct: number; note: string };
+  estimated: {
+    before_cost: number; after_cost: number; improvement_pct: number; baseline: string;
+    naive_cost: number; naive_improvement_pct: number; naive_baseline: string; note: string;
+  };
   equivalence: {
     checked: boolean; equal: boolean; original_rows?: number; optimized_rows?: number;
     columns_match?: boolean; note: string;
@@ -41,7 +45,7 @@ export interface OptimizedQuery {
     original: any; optimized: any; median_change_pct: number;
     verdict: "faster" | "slower" | "indistinguishable"; note: string; error?: string;
   } | null;
-  turso_plan: string[] | null;
+  engine_plan: string[] | null;
 }
 
 export interface OptimizeResult {
@@ -58,7 +62,10 @@ export interface OptimizeResult {
     original_tree: any; optimized_tree: any;
     transformations: { name: string; description: string; before_cost: number; after_cost: number;
       before_rows: number; after_rows: number; improvement_pct: number; details: any }[];
-    overall: { before_cost: number; after_cost: number; improvement_pct: number };
+    overall: {
+      before_cost: number; after_cost: number; improvement_pct: number; baseline: string;
+      naive_cost: number; naive_improvement_pct: number; naive_baseline: string;
+    };
   };
   explain: any;
   optimized_query: OptimizedQuery;
@@ -90,6 +97,8 @@ export const api = {
   config: () => get<any>("/api/config"),
   schema: () => get<SchemaResponse>("/api/schema"),
   examples: () => get<{ examples: Example[] }>("/api/examples"),
+  database: () => get<any>("/api/database"),
+  connectDatabase: (path: string) => post<any>("/api/database/connect", { path }),
   statistics: (table: string) => get<any>(`/api/statistics/${table}`),
   validate: (sql: string) => post<{ valid: boolean; message: string }>("/api/validate", { sql }),
   optimize: (sql: string, opts: { benchmark?: boolean; index_advisor?: boolean } = {}) =>

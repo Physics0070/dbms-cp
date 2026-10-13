@@ -1,21 +1,29 @@
 # HTTP API
 
 Base URL: `http://localhost:8000`. All responses are JSON. Secrets
-(`TURSO_AUTH_TOKEN`, `OPENAI_API_KEY`) are never exposed to any endpoint.
+(such as `OPENAI_API_KEY`) are never exposed to any endpoint.
 
 ## Health & config
 
 ### `GET /api/health`
 ```json
-{ "status": "ok", "database_backend": "SQLite (local file, libSQL-compatible)",
+{ "status": "ok", "database_backend": "SQLite · optimizer_demo.db (read-only)",
   "tables": ["categories","customers","order_items","orders","products"],
   "openai_configured": false }
 ```
 
 ### `GET /api/config`
-Non-secret cost-model constants and selectivity defaults.
+Non-secret cost-model constants, selectivity defaults and `index_creation_enabled`.
 
 ## Schema & statistics
+
+### `GET /api/database`
+The connected database: `{ connected, engine, name, path, read_only, tables, table_names }`, or
+`{ connected: false, reason }`.
+
+### `POST /api/database/connect`
+`{ "path": "C:\\data\\my.db" }` switches to another SQLite file (opened read-only). `400` with a
+clear message if the file is missing or is not a SQLite database; the previous connection stays.
 
 ### `GET /api/schema`
 Full schema: every table with columns, primary key, indexes, foreign keys, row counts,
@@ -44,12 +52,12 @@ Computed statistics (row count, per-column distinct/null/min/max/MCV, `collected
 ```
 Returns the full pipeline result: `relational_algebra`, `cardinality`, `optimization`
 (`selected` + `candidates` + `reason`), `logical_optimization` (before/after trees +
-transformations), `explain` (Turso comparison), `optimized_query`, `benchmark`,
+transformations), `explain` (SQLite plan comparison), `optimized_query`, `benchmark`,
 `index_advisor`, `summary`, and a `history_id`. `400` for non-read-only SQL.
 
 `optimized_query.status` is one of:
-- `rewritten` — a reconstructed SQL (`sql`) that changes join order and/or pushes predicates
-  down. It is only returned after the database confirms it yields the same columns and the
+- `rewritten` — a reconstructed SQL (`sql`) that changes the join order (pinned with
+  `CROSS JOIN … ON`) when the cost model estimates a gain over the query as written. It is only returned after the database confirms it yields the same columns and the
   same multiset of rows (`equivalence`). When `benchmark` is requested, both queries are timed
   and `benchmark.verdict` is `faster`/`slower` only if the measured ranges do not overlap,
   otherwise `indistinguishable`. `estimated` carries cost-model numbers and is labelled as such.
@@ -80,8 +88,9 @@ Each recommendation includes `current_cost`, `hypothetical_cost`, `improvement_p
 ```json
 { "table": "orders", "columns": ["status"], "unique": false, "confirm": true }
 ```
-Requires `confirm=true`. Validates identifiers against the schema, runs `CREATE INDEX`,
-returns the executed DDL. `400` if not confirmed or identifiers are invalid.
+Requires `confirm=true` **and** `ALLOW_INDEX_CREATION=true` on the server (`403` otherwise,
+because databases are opened read-only by default). Validates identifiers against the schema,
+runs `CREATE INDEX`, returns the executed DDL. `400` if not confirmed or identifiers are invalid.
 
 ## AI copilot
 

@@ -26,13 +26,13 @@ def test_full_pipeline_on_library_schema(library_adapter):
     assert result["summary"]["estimated_cardinality"] >= 0
 
     # statistics came from the live library DB
-    assert result["statistics_source"] == "Computed from Turso database"
+    assert result["statistics_source"] == "Computed from the connected database"
 
     # logical optimizations ran
     names = {t["name"] for t in result["logical_optimization"]["transformations"]}
     assert "Predicate Pushdown" in names
 
-    # Turso EXPLAIN comparison worked
+    # SQLite EXPLAIN comparison worked
     assert "differences" in result["explain"]
 
     # benchmark produced real timings

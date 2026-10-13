@@ -1,8 +1,8 @@
 """Optimizer orchestrator — implements the full data flow end to end.
 
-Turso -> schema discovery -> statistics -> parse -> relational algebra ->
+Database -> schema discovery -> statistics -> parse -> relational algebra ->
 selectivity -> cardinality -> candidate physical plans -> cost model -> best plan
--> logical optimizations -> Turso EXPLAIN QUERY PLAN -> (optional) benchmark ->
+-> logical optimizations -> SQLite EXPLAIN QUERY PLAN -> (optional) benchmark ->
 index advisor -> (structured payload for the AI copilot).
 """
 from __future__ import annotations
@@ -34,12 +34,18 @@ def build_optimized_query(
         "before_cost": overall["before_cost"],
         "after_cost": overall["after_cost"],
         "improvement_pct": overall["improvement_pct"],
+        "baseline": overall["baseline"],
+        "naive_cost": overall["naive_cost"],
+        "naive_improvement_pct": overall["naive_improvement_pct"],
+        "naive_baseline": overall["naive_baseline"],
         "note": "Estimated by the cost model — not a measured speedup.",
     }
     rw = rewrite_query(parsed, order, schema)
     report: dict = {
         "status": rw.status,
         "original_sql": parsed.sql.strip(),
+        # Same formatter as the rewrite, so a line diff shows real changes, not whitespace.
+        "original_pretty": parsed.ast.sql(dialect="sqlite", pretty=True),
         "sql": None,
         "changes": rw.changes,
         "reasons": rw.reasons,
@@ -48,9 +54,21 @@ def build_optimized_query(
         "estimated": estimated,
         "equivalence": None,
         "benchmark": None,
-        "turso_plan": None,
+        "engine_plan": None,
     }
     if rw.status != "rewritten":
+        return report
+
+    # A rewrite is only an optimization if the cost model finds the reordered plan cheaper
+    # than the query as written (filters already applied at the scans, as the engine does).
+    if estimated["improvement_pct"] <= cfg.min_estimated_gain_pct:
+        report.update(
+            status="no_change", changes=[], sql=None,
+            reasons=[
+                "The cost model finds no meaningfully cheaper plan than your query as written "
+                f"(estimated gain {estimated['improvement_pct']}%, below the {cfg.min_estimated_gain_pct}% threshold)."
+            ],
+        )
         return report
 
     eq = verify_equivalent(adapter, parsed.sql, rw.sql, cfg.equivalence_row_cap)
@@ -65,7 +83,7 @@ def build_optimized_query(
 
     report["sql"] = rw.sql
     try:
-        report["turso_plan"] = [s["detail"] for s in parse_explain_query_plan(adapter.explain_query(rw.sql))["steps"]]
+        report["engine_plan"] = [s["detail"] for s in parse_explain_query_plan(adapter.explain_query(rw.sql))["steps"]]
     except Exception:  # pragma: no cover
         pass
     if run_benchmark and original_benchmark and not original_benchmark.get("error"):
@@ -99,12 +117,12 @@ def optimize_query(
     # logical optimizations (before/after trees + quantified improvements)
     logical = LogicalOptimizer(parsed, stats, schema).run()
 
-    # Turso / SQLite EXPLAIN QUERY PLAN comparison
+    # SQLite EXPLAIN QUERY PLAN comparison
     try:
         eqp = parse_explain_query_plan(adapter.explain_query(sql))
         explain_cmp = compare(optimization.selected.plan.to_dict(), eqp, parsed.alias_to_table)
     except Exception as e:  # pragma: no cover
-        explain_cmp = {"error": str(e), "differences": [], "turso": None}
+        explain_cmp = {"error": str(e), "differences": [], "engine": None}
 
     # optional application benchmark
     benchmark = None
@@ -136,8 +154,8 @@ def optimize_query(
     return {
         "sql": sql,
         "optimizer_version": get_settings().optimizer_version,
-        "database_backend": getattr(adapter, "backend_name", "libSQL"),
-        "statistics_source": "Computed from Turso database",
+        "database_backend": getattr(adapter, "backend_name", "SQLite"),
+        "statistics_source": "Computed from the connected database",
         "optimization_time_ms": elapsed_ms,
         "relational_algebra": parsed.ra_tree.to_dict(),
         "cardinality": {

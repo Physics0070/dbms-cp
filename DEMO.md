@@ -75,7 +75,7 @@ SELECT status, COUNT(*) AS n FROM orders GROUP BY status ORDER BY n DESC;
 Generate the unrelated library schema and optimize against it — every page still works:
 ```bash
 python -m seed.generate --schema library --db library.db
-# set LOCAL_DB_PATH=library.db and restart the API
+# then open library.db from the database chip in the top bar (or set DATABASE_PATH)
 ```
 ```sql
 SELECT a.name, b.title

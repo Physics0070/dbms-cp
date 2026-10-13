@@ -326,7 +326,7 @@ def seed_library(conn: sqlite3.Connection, seed: int, scale: int = 1) -> dict:
 def main() -> None:
     defaults = get_settings() if get_settings else None
     p = argparse.ArgumentParser(description="Generate demo data for the SQL optimizer.")
-    p.add_argument("--db", default=getattr(defaults, "local_db_path", "optimizer_demo.db"))
+    p.add_argument("--db", default=getattr(defaults, "database_path", "optimizer_demo.db"))
     p.add_argument("--seed", type=int, default=getattr(defaults, "seed", 42))
     p.add_argument("--customers", type=int, default=getattr(defaults, "customer_count", 2000))
     p.add_argument("--orders", type=int, default=getattr(defaults, "order_count", 8000))

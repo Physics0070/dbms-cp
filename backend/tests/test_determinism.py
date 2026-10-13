@@ -11,12 +11,12 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parent.parent
 
 PROBE = """
-import sys
+import os, sys
 sys.path.insert(0, ".")
-from app.database.turso_adapter import TursoAdapter
+from app.database.sqlite_adapter import SqliteAdapter
 from app.optimizer.examples import generate_examples
 from app.optimizer.orchestrator import optimize_query
-a = TursoAdapter()
+a = SqliteAdapter(os.environ['DATABASE_PATH'])
 rows = []
 for e in generate_examples(a):
     r = optimize_query(a, e["sql"], run_index_advisor=False)
@@ -29,8 +29,8 @@ print(rows)
 
 def _run(db_path: str, seed: int) -> str:
     import os
-    env = dict(os.environ, PYTHONHASHSEED=str(seed), LOCAL_DB_PATH=db_path,
-               TURSO_DATABASE_URL="", PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, PYTHONHASHSEED=str(seed), DATABASE_PATH=db_path,
+               PYTHONIOENCODING="utf-8")
     p = subprocess.run([sys.executable, "-c", PROBE], cwd=BACKEND, env=env,
                        capture_output=True, text=True, timeout=120)
     assert p.returncode == 0, p.stderr
@@ -38,6 +38,6 @@ def _run(db_path: str, seed: int) -> str:
 
 
 def test_plan_and_rewrite_independent_of_hash_seed(ecommerce_adapter):
-    db = ecommerce_adapter._settings.local_db_path
+    db = str(ecommerce_adapter.path)
     outputs = {seed: _run(db, seed) for seed in (0, 1, 2, 3)}
     assert len(set(outputs.values())) == 1, "optimizer output changed with PYTHONHASHSEED"

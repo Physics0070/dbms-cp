@@ -1,7 +1,7 @@
 def test_row_count_matches_data(ecommerce_adapter):
     st = ecommerce_adapter.get_statistics("orders")
     assert st.row_count == 1200
-    assert st.source == "Computed from Turso database"
+    assert st.source == "Computed from the connected database"
     assert st.collected_at
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ...database.turso_adapter import TursoAdapter
+from ...database.sqlite_adapter import SqliteAdapter
 from ...optimizer import copilot
 from ...optimizer.explain_parser import parse_explain_query_plan
 from ...optimizer.orchestrator import optimize_query
@@ -47,7 +47,7 @@ def validate(req: SqlRequest) -> dict:
 
 
 @router.post("/api/optimize")
-def optimize(req: OptimizeRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def optimize(req: OptimizeRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     try:
         result = optimize_query(
             adapter, req.sql, run_benchmark=req.benchmark, run_index_advisor=req.index_advisor
@@ -63,7 +63,7 @@ def optimize(req: OptimizeRequest, adapter: TursoAdapter = Depends(adapter_dep))
 
 
 @router.post("/api/explain")
-def explain(req: SqlRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def explain(req: SqlRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     try:
         validate_readonly(req.sql)
     except UnsafeQueryError as e:
@@ -81,7 +81,7 @@ def explain(req: SqlRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> di
 
 
 @router.post("/api/benchmark")
-def benchmark(req: BenchmarkRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def benchmark(req: BenchmarkRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     try:
         validate_readonly(req.sql)
     except UnsafeQueryError as e:
@@ -93,7 +93,7 @@ def benchmark(req: BenchmarkRequest, adapter: TursoAdapter = Depends(adapter_dep
 
 
 @router.post("/api/copilot")
-def ai_copilot(req: CopilotRequest, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def ai_copilot(req: CopilotRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     try:
         result = optimize_query(adapter, req.sql, run_benchmark=False, run_index_advisor=True)
     except UnsafeQueryError as e:

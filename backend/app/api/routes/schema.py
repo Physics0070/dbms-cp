@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...database.turso_adapter import TursoAdapter
+from ...database.sqlite_adapter import SqliteAdapter
 from ..deps import adapter_dep
 
 router = APIRouter(tags=["schema"])
 
 
-def _table_to_dict(adapter: TursoAdapter, name: str, with_rows: bool = True) -> dict:
+def _table_to_dict(adapter: SqliteAdapter, name: str, with_rows: bool = True) -> dict:
     ts = adapter.get_table_schema(name)
     d = {
         "name": ts.name,
@@ -45,7 +45,7 @@ def _table_to_dict(adapter: TursoAdapter, name: str, with_rows: bool = True) -> 
 
 
 @router.get("/api/schema")
-def get_schema(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def get_schema(adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     tables = adapter.get_tables()
     relationships = []
     for t in tables:
@@ -64,27 +64,28 @@ def get_schema(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
 
 
 @router.get("/api/examples")
-def get_examples(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def get_examples(adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     """Example queries generated from the live schema + statistics (never hardcoded)."""
+    from ...config import get_settings
     from ...optimizer.examples import generate_examples
 
-    return {"examples": generate_examples(adapter)}
+    return {"examples": generate_examples(adapter, limit=get_settings().example_limit)}
 
 
 @router.get("/api/schema/tables")
-def get_tables(adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def get_tables(adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     return {"tables": adapter.get_tables()}
 
 
 @router.get("/api/schema/{table}")
-def get_table(table: str, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def get_table(table: str, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     if table not in adapter.get_tables():
         raise HTTPException(status_code=404, detail=f"Unknown table: {table}")
     return _table_to_dict(adapter, table)
 
 
 @router.get("/api/statistics/{table}")
-def get_statistics(table: str, adapter: TursoAdapter = Depends(adapter_dep)) -> dict:
+def get_statistics(table: str, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     if table not in adapter.get_tables():
         raise HTTPException(status_code=404, detail=f"Unknown table: {table}")
     return adapter.get_statistics(table).to_dict()

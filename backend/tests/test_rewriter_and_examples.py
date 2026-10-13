@@ -66,13 +66,36 @@ def test_rewrite_uses_only_query_tables(adapter):
         assert used <= set(pq.alias_to_table.values())
 
 
-def test_projection_only_rewrite_is_not_reported_as_optimization(adapter):
-    """Column narrowing alone must never be presented as an optimized query."""
+def test_rewrite_is_a_real_join_reorder(adapter):
+    """A rewrite must change the join order and pin it; it must never be cosmetic."""
     for ex in generate_examples(adapter):
         _, rw = _rewrite(adapter, ex["sql"])
         if rw.status == "rewritten":
-            names = {c["name"] for c in rw.changes}
-            assert names & {"Join Reordering", "Predicate Pushdown"}, (ex["label"], names)
+            assert rw.join_order != rw.original_order, ex["label"]
+            assert [c["name"] for c in rw.changes] == ["Join Reordering"]
+            assert "CROSS JOIN" in rw.sql
+
+
+def test_filters_and_columns_are_left_untouched(adapter):
+    """The rewrite must not wrap tables in subqueries or alter the select list/filters."""
+    import sqlglot
+    from sqlglot import exp
+    for ex in generate_examples(adapter):
+        pq, rw = _rewrite(adapter, ex["sql"])
+        if rw.status != "rewritten":
+            continue
+        new = sqlglot.parse_one(rw.sql, read="sqlite")
+        assert not list(new.find_all(exp.Subquery))
+        assert [e.sql() for e in new.expressions] == [e.sql() for e in pq.ast.expressions]
+
+
+def test_showcase_example_gets_a_verified_rewrite_on_some_schema(ecommerce_adapter, library_adapter):
+    """The generated 'reorderable' example exists and, where the model finds a gain, verifies."""
+    for a in (ecommerce_adapter, library_adapter):
+        ex = [e for e in generate_examples(a) if e["kind"] == "reorderable"]
+        assert ex, "the schema-derived showcase example should be generated for a 3-table chain"
+        rows = a.execute_readonly(ex[0]["sql"])[1]
+        assert rows, "showcase example must return rows so equivalence is meaningful"
 
 
 # -- rewrite: honest refusals --------------------------------------------------

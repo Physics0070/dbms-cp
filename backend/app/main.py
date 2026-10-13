@@ -5,24 +5,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .api.routes import history, index_advisor, optimize, schema
+from .api.routes import database, history, index_advisor, optimize, schema
 
 settings = get_settings()
 
 app = FastAPI(
     title="AI-Powered Cost-Based SQL Query Optimizer",
-    description="A schema-agnostic, cost-based SQL optimizer & performance analyzer over Turso/libSQL.",
+    description="A schema-agnostic, cost-based SQL optimizer & performance analyzer over any SQLite database.",
     version=settings.optimizer_version,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin, "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(database.router)
 app.include_router(schema.router)
 app.include_router(optimize.router)
 app.include_router(index_advisor.router)
@@ -31,9 +32,13 @@ app.include_router(history.router)
 
 @app.get("/api/health")
 def health() -> dict:
-    from .database.turso_adapter import get_adapter
+    from .database.sqlite_adapter import DatabaseUnavailable, get_adapter
 
-    adapter = get_adapter()
+    try:
+        adapter = get_adapter()
+    except DatabaseUnavailable as e:
+        return {"status": "no_database", "reason": str(e), "database_backend": None,
+                "tables": [], "openai_configured": bool(settings.openai_api_key)}
     return {
         "status": "ok",
         "database_backend": adapter.backend_name,
@@ -59,4 +64,5 @@ def config() -> dict:
             "join": settings.default_join_selectivity,
         },
         "openai_configured": bool(settings.openai_api_key),
+        "index_creation_enabled": settings.allow_index_creation,
     }

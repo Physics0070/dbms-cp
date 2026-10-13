@@ -33,7 +33,7 @@ export default function Statistics() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">Statistics</h1>
-          <p className="text-sm text-muted">Computed live from Turso/libSQL with SQL aggregates.</p>
+          <p className="text-sm text-muted">Computed live from the connected database with SQL aggregates.</p>
         </div>
         <select className="input" value={table} onChange={(e) => setTable(e.target.value)} aria-label="Select table">
           {tables.map((t) => <option key={t} value={t}>{t}</option>)}

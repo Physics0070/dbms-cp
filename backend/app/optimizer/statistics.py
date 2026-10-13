@@ -1,7 +1,7 @@
 """Statistics provider — a thin, cached facade over the adapter's computed stats.
 
 All numbers ultimately come from `DatabaseAdapter.get_statistics`, which computes
-them with real SQL against the live Turso/libSQL data. Nothing is hardcoded.
+them with real SQL against the live database. Nothing is hardcoded.
 """
 from __future__ import annotations
 

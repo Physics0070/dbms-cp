@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmt, OptimizeResult, OptimizedQuery } from "../api";
 import { SqlEditor, SqlView } from "../components/SqlEditor";
+import { diffLines } from "../lib/diff";
 import { PlanFlow, TreeNode, operatorColor } from "../components/PlanFlow";
 import { CostBarChart } from "../components/CostChart";
 import { Badge, CopyButton, Empty, ErrorNote, Loading, Panel, Segmented, Stat } from "../components/ui";
@@ -21,7 +22,7 @@ export default function Workspace() {
     { id: "plan", label: "Plan" },
     { id: "candidates", label: "Candidates", badge: result?.optimization.candidates.length },
     { id: "rewrites", label: "Rewrites" },
-    { id: "turso", label: "Turso" },
+    { id: "engine", label: "SQLite plan" },
     { id: "index", label: "Index advisor", badge: result?.index_advisor?.recommendations?.length },
     { id: "copilot", label: "Copilot" },
   ];
@@ -86,7 +87,7 @@ export default function Workspace() {
         <Empty icon="⚡" title="Run the optimizer">
           Write a read-only <span className="font-mono">SELECT</span> above and press{" "}
           <span className="font-semibold text-ink">Optimize</span>. You'll get the chosen plan, candidate
-          comparison, logical rewrites, a Turso plan comparison, index advice and an AI explanation —
+          comparison, logical rewrites, a SQLite plan comparison, index advice and an AI explanation —
           all from the live database.
         </Empty>
       )}
@@ -99,7 +100,7 @@ export default function Workspace() {
           {tab === "plan" && <PlanTab r={result} />}
           {tab === "candidates" && <CandidatesTab r={result} />}
           {tab === "rewrites" && <RewritesTab r={result} />}
-          {tab === "turso" && <TursoTab r={result} />}
+          {tab === "engine" && <EnginePlanTab r={result} />}
           {tab === "index" && <IndexTab r={result} />}
           {tab === "copilot" && <CopilotTab r={result} />}
         </div>
@@ -177,6 +178,10 @@ function SummaryTab({ r, onJump }: { r: OptimizeResult; onJump: (t: ResultTab) =
             <div className="h-full rounded-full bg-ok transition-[width] duration-500"
               style={{ width: `${Math.max(0, Math.min(100, overall.improvement_pct))}%` }} />
           </div>
+          <p className="mt-3 text-2xs text-faint">Baseline: {overall.baseline}</p>
+          <p className="mt-0.5 text-2xs text-faint">
+            For reference, against a plan with no pushdown at all ({fmt(overall.naive_cost)}): {fmt(overall.naive_improvement_pct)}% — {overall.naive_baseline}
+          </p>
           <button className="btn btn-ghost mt-3 text-xs" onClick={() => onJump("rewrites")}>See before/after trees →</button>
         </Panel>
 
@@ -216,7 +221,8 @@ function optBadge(o?: OptimizedQuery) {
 function OptimizedTab({ r }: { r: OptimizeResult }) {
   const o = r.optimized_query;
   const { setSql, setTab } = useStore();
-  const [showTurso, setShowTurso] = useState(false);
+  const [showEngine, setShowEngine] = useState(false);
+  const [markChanges, setMarkChanges] = useState(true);
 
   if (!o || o.status === "error") {
     return <Empty title="Unavailable">{o?.reasons?.join(" ") || "The optimized query could not be generated."}</Empty>;
@@ -264,6 +270,7 @@ function OptimizedTab({ r }: { r: OptimizeResult }) {
 
   // status === "rewritten" (verified equivalent)
   const eq = o.equivalence!;
+  const diff = diffLines(o.original_pretty, o.sql!);
   const bm = o.benchmark && !o.benchmark.error ? o.benchmark : null;
   const verdictTone = bm?.verdict === "faster" ? "ok" : bm?.verdict === "slower" ? "warn" : "neutral";
 
@@ -275,19 +282,44 @@ function OptimizedTab({ r }: { r: OptimizeResult }) {
           {eq.original_rows} row{eq.original_rows === 1 ? "" : "s"} from both queries — same columns, same rows.
         </span>
         <span className="text-2xs text-faint">{eq.note}</span>
-        <button className="btn btn-primary ml-auto !py-1 text-xs"
+        <button className={`btn ml-auto !py-1 text-xs ${bm?.verdict === "slower" ? "btn-ghost" : "btn-primary"}`}
           onClick={() => { setSql(o.sql!); setTab("summary"); }} title="Load the optimized SQL into the editor">
           Use this query
         </button>
       </div>
 
+      {/* The measurement outranks the estimate: say what actually happened. */}
+      <div className={`rounded-xl border px-4 py-3 text-sm ${
+        bm?.verdict === "faster" ? "border-[color:var(--ok)] bg-[color:var(--ok-soft)]"
+        : bm?.verdict === "slower" ? "border-[color:var(--warn)] bg-[color:var(--warn-soft)]"
+        : "border-line bg-panel"}`}>
+        {!bm && (<span className="text-muted">
+          <b className="text-ink">Not measured.</b> The cost model estimates a gain of {fmt(o.estimated.improvement_pct)}%, but that is an
+          estimate. Turn on <span className="font-medium text-ink">Benchmark execution</span> and re-run to time both queries.</span>)}
+        {bm?.verdict === "faster" && (<span><b className="text-ok">Measured faster.</b> <span className="text-muted">
+          The optimized query's timings are consistently below the original's on this database.</span></span>)}
+        {bm?.verdict === "slower" && (<span><b className="text-warn">Measured slower — keep your original query.</b> <span className="text-muted">
+          The cost model predicted a gain of {fmt(o.estimated.improvement_pct)}%, but on this database the rewrite ran slower. SQLite's
+          planner already chooses a good join order on its own, and pinning ours overrides it.</span></span>)}
+        {bm?.verdict === "indistinguishable" && (<span><b className="text-ink">No measurable difference.</b> <span className="text-muted">
+          The cost model predicted {fmt(o.estimated.improvement_pct)}%, but the timings overlap, so no speedup can be claimed.</span></span>)}
+      </div>
+
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Original" right={<CopyButton text={o.original_sql} />} bodyClass="p-3">
-          <SqlView sql={o.original_sql} />
+        <Panel title={<div className="flex items-center gap-2">Original <span className="text-2xs font-normal text-faint">reformatted</span></div>}
+          right={<div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-1.5 text-2xs text-muted">
+              <input type="checkbox" className="accent-[color:var(--accent)]" checked={markChanges}
+                onChange={(e) => setMarkChanges(e.target.checked)} />
+              Highlight changes
+            </label>
+            <CopyButton text={o.original_sql} />
+          </div>} bodyClass="p-3">
+          <SqlView sql={o.original_pretty} marks={markChanges ? diff.removed : undefined} markTone="del" />
         </Panel>
         <Panel title={<div className="flex items-center gap-2">Optimized <Badge tone="ok">rewritten</Badge></div>}
           right={<CopyButton text={o.sql!} />} bodyClass="p-3">
-          <SqlView sql={o.sql!} />
+          <SqlView sql={o.sql!} marks={markChanges ? diff.added : undefined} markTone="add" />
         </Panel>
       </div>
 
@@ -307,7 +339,11 @@ function OptimizedTab({ r }: { r: OptimizeResult }) {
               </div>
             </div>
           </div>
-          <p className="mt-3 text-2xs text-faint">{o.estimated.note}</p>
+          <p className="mt-3 text-2xs text-faint">Baseline: {o.estimated.baseline}</p>
+          <p className="mt-0.5 text-2xs text-faint">
+            For reference, against a plan with no pushdown ({fmt(o.estimated.naive_cost)}): {fmt(o.estimated.naive_improvement_pct)}%. {o.estimated.naive_baseline}
+          </p>
+          <p className="mt-1 text-2xs text-faint">{o.estimated.note}</p>
         </Panel>
 
         <Panel title={<div className="flex items-center gap-2">Measured {bm ? measuredChip : <Badge>unavailable</Badge>}</div>}>
@@ -347,14 +383,14 @@ function OptimizedTab({ r }: { r: OptimizeResult }) {
         </ul>
       </Panel>
 
-      {o.turso_plan && (
+      {o.engine_plan && (
         <div>
-          <button className="btn btn-subtle !px-0 text-xs" onClick={() => setShowTurso((v) => !v)}>
-            {showTurso ? "▾" : "▸"} Turso query plan for the optimized SQL
+          <button className="btn btn-subtle !px-0 text-xs" onClick={() => setShowEngine((v) => !v)}>
+            {showEngine ? "▾" : "▸"} SQLite query plan for the optimized SQL
           </button>
-          {showTurso && (
+          {showEngine && (
             <ol className="mt-2 space-y-1">
-              {o.turso_plan.map((d, i) => (
+              {o.engine_plan.map((d, i) => (
                 <li key={i} className="rounded-md bg-panel-2 px-2.5 py-1.5 font-mono text-2xs text-muted">{d}</li>
               ))}
             </ol>
@@ -494,11 +530,14 @@ function RewritesTab({ r }: { r: OptimizeResult }) {
   );
 }
 
-/* -------------------------------------------------------------------- Turso */
-function TursoTab({ r }: { r: OptimizeResult }) {
+/* ------------------------------------------------------------- SQLite plan */
+function EnginePlanTab({ r }: { r: OptimizeResult }) {
   const ex = r.explain;
   if (!ex || ex.error) return <Empty title="Unavailable">EXPLAIN comparison unavailable{ex?.error ? `: ${ex.error}` : ""}.</Empty>;
-  const c = ex.custom, t = ex.turso;
+  if (!ex.engine) {
+    return <Empty title="Unavailable">This result was saved by an older version and has no SQLite plan data. Re-run the query to see it.</Empty>;
+  }
+  const c = ex.custom, t = ex.engine;
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -509,7 +548,7 @@ function TursoTab({ r }: { r: OptimizeResult }) {
             ["Explicit sort", c.has_sort ? "yes" : "no"],
           ]} />
         </Panel>
-        <Panel title={<div className="flex items-center gap-2">Turso / libSQL <Badge>EXPLAIN QUERY PLAN</Badge></div>}>
+        <Panel title={<div className="flex items-center gap-2">SQLite <Badge>EXPLAIN QUERY PLAN</Badge></div>}>
           <Rows rows={[
             ["Tables", t.tables.join(", ")], ["Indexes", t.indexes_used.join(", ") || "none"],
             ["Temp B-tree", t.uses_temp_btree ? "yes" : "no"],
@@ -556,6 +595,8 @@ function IndexTab({ r }: { r: OptimizeResult }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [canCreate, setCanCreate] = useState(false);
+  useEffect(() => { api.config().then((c) => setCanCreate(!!c.index_creation_enabled)).catch(() => {}); }, []);
   if (!adv) return <Empty title="Not run">The index advisor was not run for this query.</Empty>;
 
   async function create(table: string, columns: string[]) {
@@ -595,7 +636,10 @@ function IndexTab({ r }: { r: OptimizeResult }) {
                 <div className="label">current → hypothetical {estChip}</div>
                 <div className="mt-1 tabular-nums"><b>{fmt(x.current_cost)}</b> → <b>{fmt(x.hypothetical_cost)}</b></div>
                 <div className="mt-1"><Badge tone={positive ? "ok" : "neutral"}>{fmt(x.improvement_pct)}% {positive ? "cheaper" : "no gain"}</Badge></div>
-                {positive && (
+                {positive && !canCreate && (
+                  <p className="mt-2 max-w-[16rem] text-2xs text-faint">Index creation is disabled (the database is read-only). Set <code>ALLOW_INDEX_CREATION=true</code> in backend/.env to enable it.</p>
+                )}
+                {positive && canCreate && (
                   <div className="mt-2">
                     {created[key] ? <Badge tone="ok">created ✓</Badge>
                       : confirming === key ? (

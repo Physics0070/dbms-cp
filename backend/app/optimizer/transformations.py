@@ -270,20 +270,28 @@ class LogicalOptimizer:
         original_tree = parsed.ra_tree.to_dict()
         optimized_tree = build_optimized_logical(parsed, best_order, schema).to_dict()
 
-        overall_before = naive_plan.cumulative_cost
-        overall_after = best_plan.cumulative_cost
-        overall_pct = (
-            round(100.0 * (overall_before - overall_after) / overall_before, 2)
-            if overall_before > 0 else 0.0
-        )
+        def pct(before: float, after: float) -> float:
+            return round(100.0 * (before - after) / before, 2) if before > 0 else 0.0
+
+        # Primary baseline: the query as the user wrote it (written join order) with
+        # filters already applied at the scans, which is what a real planner does.
+        # The no-pushdown figure is kept only as a labelled secondary reference.
+        written_cost = pushed_written.cumulative_cost
+        after_cost = best_plan.cumulative_cost
+        naive_cost = naive_plan.cumulative_cost
 
         return {
             "original_tree": original_tree,
             "optimized_tree": optimized_tree,
             "transformations": [t.to_dict() for t in transformations],
             "overall": {
-                "before_cost": round(overall_before, 4),
-                "after_cost": round(overall_after, 4),
-                "improvement_pct": overall_pct,
+                "before_cost": round(written_cost, 4),
+                "after_cost": round(after_cost, 4),
+                "improvement_pct": pct(written_cost, after_cost),
+                "baseline": "Your query's written join order, with filters applied at the scans.",
+                "naive_cost": round(naive_cost, 4),
+                "naive_improvement_pct": pct(naive_cost, after_cost),
+                "naive_baseline": "A plan with no predicate pushdown (all filters after the joins) — "
+                                  "a reference point, not how SQLite executes the query.",
             },
         }

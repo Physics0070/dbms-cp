@@ -16,13 +16,15 @@ class Settings(BaseSettings):
     )
 
     # --- Database -----------------------------------------------------------
-    turso_database_url: str = ""
-    turso_auth_token: str = ""
-    local_db_path: str = "optimizer_demo.db"
+    database_path: str = "optimizer_demo.db"   # SQLite file connected at startup
+    allow_index_creation: bool = False          # False -> database opened read-only
 
     # --- AI -----------------------------------------------------------------
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    openai_api_url: str = "https://api.openai.com/v1/chat/completions"
+    openai_temperature: float = 0.2
+    openai_timeout_s: float = 45.0
 
     # --- Seed generation ----------------------------------------------------
     seed: int = 42
@@ -54,16 +56,20 @@ class Settings(BaseSettings):
     benchmark_warmup: int = 2
     benchmark_runs: int = 5
     equivalence_row_cap: int = 50000     # max rows compared when verifying a rewrite
+    min_estimated_gain_pct: float = 0.5  # below this a rewrite is not reported as an optimization
 
     # --- Misc ---------------------------------------------------------------
     history_limit: int = 200
+    history_path: str = ""               # empty -> backend/query_history.json
+    example_limit: int = 6               # example queries generated from the schema
     optimizer_version: str = "1.1.0"
     stats_cache_ttl: int = 300
-    frontend_origin: str = "http://localhost:5173"
+    # Comma-separated origins allowed to call the API from a browser.
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property
-    def use_remote(self) -> bool:
-        return bool(self.turso_database_url.strip())
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

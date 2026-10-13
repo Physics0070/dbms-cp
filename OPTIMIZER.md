@@ -57,43 +57,55 @@ hardcoded.
 Each candidate is fully costed; the lowest cumulative cost wins. The result explains
 *why* (cost, join order, methods, margin over the next distinct candidate).
 
-## 6. Logical optimizations (`transformations.py`)
+## 6. Logical analysis (`transformations.py`)
 
-Operate on the actual RA tree and are quantified by re-costing:
+Operates on the actual RA tree and quantifies each idea by re-costing:
 
 - **Predicate Pushdown** — push single-table WHERE conjuncts to just above their scan.
-  Measured as *naive (filter above joins)* vs *pushed* cost.
 - **Join Reordering** — written order vs the cost-based best order.
-- **Projection Pushdown** — keep only the columns each downstream operator needs
-  (reported as columns available → columns kept).
+- **Projection Pushdown** — keep only the columns each downstream operator needs.
 
-The page shows the original tree, the optimized tree, and per-transformation
-before/after cost + improvement %.
+The Rewrites tab shows the original and transformed trees with per-transformation cost deltas.
+The headline estimate compares the best plan with **your query as written** (written join order,
+filters already applied at the scans, which is what a real planner does). A plan with no
+pushdown at all is reported separately as a labelled reference, because no engine executes that.
 
-## 7. Turso comparison, benchmark, index advice
+## 7. Engine plan comparison, benchmark, index advice
 
-- `explain_parser.py` parses SQLite/libSQL `EXPLAIN QUERY PLAN` and compares scan
-  methods, index usage and sorting against our plan (alias-normalised).
-- `adapter.benchmark_query` runs warm-up + measured executions and reports
-  min/max/avg/median — labelled as an Application Benchmark, never mixed with cost.
-- `index_advisor.py` discovers candidate columns from WHERE/JOIN/ORDER BY/GROUP BY,
-  simulates a hypothetical index on a **copy** of the schema, re-runs the optimizer, and
-  reports the cost delta and affected operator. No index is created unless explicitly
-  confirmed.
+- `explain_parser.py` parses SQLite's `EXPLAIN QUERY PLAN` and compares scan methods, index
+  usage and sorting against our plan (alias-normalised).
+- `adapter.benchmark_query` runs warm-up + measured executions and reports min/max/avg/median —
+  labelled as an Application Benchmark, never mixed with cost.
+- `index_advisor.py` discovers candidate columns from WHERE/JOIN/ORDER BY/GROUP BY, simulates a
+  hypothetical index on a **copy** of the schema, re-runs the optimizer, and reports the cost
+  delta and affected operator. The index is simulated in our cost model, not by the engine, and
+  no index is created unless `ALLOW_INDEX_CREATION=true` and the user confirms.
 
 ## 8. Optimized-query reconstruction (`rewriter.py`)
 
-From the chosen join order the rewriter re-emits SQL (via the `sqlglot` AST) that joins in
-that order, moves single-relation predicates into the relation they filter, and narrows each
-relation to the columns the rest of the query uses. It deliberately declines anything that
-could change results: outer joins, subqueries/CTEs/set operations, `LIMIT/OFFSET`, unresolved
-columns; `SELECT *` pins the join order because it fixes output column order. A projection-only
-rewrite is not reported as an optimization (no cost-model effect; SQLite flattens subqueries).
+The one thing a rewrite can control is **join order**. SQLite already applies single-table
+filters at the scan, so wrapping them in subqueries changes the SQL text but not the plan (and
+measured slower in testing); pushdown and projection are reported in the analysis tabs instead
+of being emitted.
 
-A rewrite is never shown on trust: `verify_equivalent` executes both queries and compares
-columns and the multiset of rows (row order is not compared). Timing comparisons only claim
-"faster/slower" when the measured min–max ranges do not overlap. Join enumeration is
-deterministic (ties resolve to the written order), so results do not vary between runs.
+From the cost-based join order the rewriter re-emits the query with the same tables, filters and
+select list, joined in the chosen order. SQLite normally picks its own order and ignores the
+written one, so the order is pinned with `CROSS JOIN … ON`, which SQLite treats as fixed. Join
+conditions move to the earliest join that has all their tables; everything else stays untouched.
+
+It declines anything that could change results: outer joins, subqueries/CTEs/set operations,
+`LIMIT/OFFSET`, unresolved columns. `SELECT *` keeps the written order because it fixes output
+column order. The query is reported as **rewritten** only if the cost model estimates a gain above
+`MIN_ESTIMATED_GAIN_PCT` against the query as written; otherwise the answer is "already optimal".
+
+A rewrite is never shown on trust. `verify_equivalent` executes both queries and compares the
+columns and the multiset of rows (row order is not compared). That is evidence for the connected
+data, not a proof for every possible database. Timing only claims "faster/slower" when the measured
+min–max ranges do not overlap. Because pinning our order overrides SQLite's own planner, the
+measurement can disagree with the estimate — the UI leads with the measurement when it does.
+
+Join enumeration is deterministic (ties resolve to the written order), so results do not vary
+between runs or processes.
 
 ## 9. AI explanation (`copilot.py`)
 

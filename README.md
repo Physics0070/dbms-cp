@@ -1,117 +1,97 @@
-# AI-Powered Cost-Based SQL Query Optimizer & Database Performance Analyzer
+# QueryPilot AI
 
-A web-based, **cost-based SQL query optimizer** and performance analyzer built on
-**Turso / libSQL** (SQLite-compatible). It parses SQL with `sqlglot`, discovers the
-live database schema dynamically, computes real statistics, estimates selectivity
-and cardinality, enumerates candidate physical plans, costs them with an explicit
-educational cost model, selects the cheapest, applies logical optimizations,
-compares against SQLite/libSQL `EXPLAIN QUERY PLAN`, benchmarks real execution
-time, advises on hypothetical indexes, and explains everything through an AI
-copilot — all surfaced in a professional React dashboard.
+**Write smarter queries. Understand every execution.**
 
-![DBMS-CP workspace](docs/screenshots/01-workspace.jpg)
+A SQL query optimizer and performance workbench for any SQLite database. Paste a query
+and it shows how a cost-based optimizer would execute it, compares the alternatives,
+suggests a reordered query when the cost model finds one, **checks that the rewrite returns
+the same rows, measures both, and tells you honestly whether it helped.**
 
-> **The optimizer is schema-agnostic.** The 5-table e-commerce database is only a
-> demonstration dataset. Point it at any SQLite/libSQL/Turso database and it keeps
-> working. A test suite proves this by running the whole pipeline against a second,
-> unrelated "library" schema and by statically auditing the optimizer source for
-> hardcoded table names.
+![QueryPilot AI workspace](docs/screenshots/01-workspace.jpg)
 
-## What it does (the data flow)
+> **It is not tied to one database.** Nothing in the optimizer knows a table or column name.
+> Point it at any SQLite file (or switch files from the top bar) and the schema, statistics,
+> example queries and plans all come from that database. Tests run the whole pipeline on two
+> unrelated schemas and on a database with awkward identifiers (`"Order Details"`).
 
-```
-Turso/libSQL → Schema Discovery → Statistics → SQL Parser → Relational Algebra
-→ Selectivity → Cardinality → Candidate Physical Plans → Cost Model → Best Plan
-→ Logical Optimizations → Turso EXPLAIN QUERY PLAN → Application Benchmark
-→ Index Advisor → AI Explanation → React Dashboard
-```
+## What it does
+
+For a read-only `SELECT`, the backend:
+
+1. **Discovers the schema** (tables, columns, keys, indexes, foreign keys).
+2. **Computes statistics** from the live data (row counts, distinct values, nulls, min/max,
+   most-common values).
+3. **Parses** the SQL with `sqlglot` into a relational-algebra tree.
+4. **Estimates** selectivity and cardinality, then **costs** candidate physical plans with an
+   explicit, documented cost model ([COST_MODEL.md](COST_MODEL.md)).
+5. **Picks the cheapest plan** and explains why it won.
+6. **Suggests a reordered query** (join order only) and **verifies** it returns the same rows.
+7. **Benchmarks** the original and the rewrite and reports *faster / slower / no measurable
+   difference* — never a speedup the measurements don't support.
+8. **Compares with SQLite's own `EXPLAIN QUERY PLAN`**, advises on hypothetical indexes, and
+   explains the result with an optional AI copilot (works offline without a key).
+
+## Being honest about results
+
+The cost model is an educational estimator, not a copy of SQLite's planner, and SQLite's
+planner is good. In testing, join orders that the model preferred were **sometimes slower**
+when forced on SQLite. The UI therefore leads with the measurement:
+
+![Optimized query tab](docs/screenshots/02-optimized-query.jpg)
+
+- **Estimated** (cost model) and **Measured** (wall-clock) are always labelled and never mixed.
+- A rewrite is shown only if the database confirms it returns the same columns and rows
+  *on this data* (evidence, not a proof for every database).
+- "Faster" or "slower" is only claimed when the measured ranges don't overlap.
+- If the query is already optimal, it says so.
+- The estimated gain is measured against **your query as written**, not a strawman.
 
 ## Screenshots
 
-**Execution plan** — the lowest-cost physical plan as an interactive tree. Each node
-shows estimated rows and cost; the bar under each node is a cost-heat indicator
-(expensive operators glow red), and clicking a node opens the operator inspector.
+**Execution plan** — cost-heat bars mark expensive operators; click a node for details.
 
-![Execution plan tree](docs/screenshots/02-execution-plan.jpg)
+![Execution plan](docs/screenshots/03-execution-plan.jpg)
 
-**Candidate plans** — every enumerated join order/method, costed and ranked; the
-selected (lowest-cost) plan is highlighted.
+**Candidate plans** — every enumerated join order, costed and ranked.
 
-![Candidate plan comparison](docs/screenshots/03-candidates.jpg)
+![Candidates](docs/screenshots/04-candidates.jpg)
 
-**Logical rewrites** — the original relational-algebra tree vs. the optimized tree
-(predicate pushdown, projection pushdown, join reordering), with quantified cost deltas.
+**Schema** — discovered dynamically from whichever database is connected.
 
-![Relational algebra rewrites](docs/screenshots/04-rewrites.jpg)
-
-**Schema Explorer** — the connected database, discovered dynamically: tables, columns,
-keys, indexes and foreign-key relationships.
-
-![Schema explorer](docs/screenshots/05-schema.jpg)
-
-> The UI clearly separates **estimated** cost-model values from **measured** benchmark
-> timings, and never presents an estimate as a measured speedup. Dark and light themes
-> are both supported.
-
-## Feature highlights
-
-- **Dynamic schema discovery** via `sqlite_master` + `PRAGMA table_info / index_list /
-  index_info / foreign_key_list`.
-- **Statistics engine** that computes row counts, distinct counts, null fractions,
-  min/max and most-common-value histograms with real SQL aggregates.
-- **Selectivity engine** (equality, inequality, ranges, `BETWEEN`, `IN`, `IS [NOT] NULL`,
-  `AND`, `OR`) that reports its method and assumptions — no magic numbers.
-- **Cardinality estimation** including the System-R equi-join formula.
-- **Explicit cost model** (sequential/index scan; nested-loop, index-nested-loop, hash,
-  merge joins; filter, projection, sort, aggregate) — documented in
-  [COST_MODEL.md](COST_MODEL.md).
-- **Physical plan enumeration** with join-order search (exhaustive for small queries,
-  System-R dynamic programming for larger ones).
-- **Logical optimizations**: predicate pushdown, projection pushdown, join reordering,
-  each with before/after trees and quantified cost improvement.
-- **Turso/SQLite `EXPLAIN QUERY PLAN` comparison** (plus optional `EXPLAIN` bytecode).
-- **Application-level benchmarking** (warm-up + measured runs; min/max/avg/median) kept
-  strictly separate from estimated cost.
-- **What-if index advisor** that simulates a hypothetical index and re-costs the plan,
-  never creating an index unless you explicitly ask.
-- **AI Copilot** grounded strictly in the optimizer's structured output, with a full
-  offline deterministic fallback.
-- **Read-only safety** enforced on the `sqlglot` AST.
+![Schema](docs/screenshots/05-schema.jpg)
 
 ## Quick start
 
-See [SETUP.md](SETUP.md) for full details.
-
 ```bash
-# 1) Backend
+# Backend
 cd backend
-python -m venv .venv && . .venv/Scripts/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv && . .venv/Scripts/activate   # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python -m seed.generate                 # generate the demo database
+python -m seed.generate                 # optional: create the demo database
 uvicorn app.main:app --reload --port 8000
 
-# 2) Frontend (in another terminal)
+# Frontend (second terminal)
 cd frontend
 npm install
 npm run dev                             # http://localhost:5173
 ```
 
-Then open the dashboard, go to **SQL Optimizer**, and click **Optimize**.
+Open the dashboard and press **Optimize** — the editor starts with an example generated
+from your database's own schema. Use the database chip in the top bar to open any other
+SQLite file. Details: [SETUP.md](SETUP.md).
 
-## Documentation
+## Configuration
 
-| Doc | Contents |
-|-----|----------|
-| [SETUP.md](SETUP.md) | Install & run (local file or remote Turso) |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Modules, layering, data flow |
-| [OPTIMIZER.md](OPTIMIZER.md) | Parsing → RA → plans → selection |
-| [COST_MODEL.md](COST_MODEL.md) | Every cost formula |
-| [STATISTICS.md](STATISTICS.md) | How stats & selectivity are computed |
-| [TURSO.md](TURSO.md) | Why Turso/libSQL, how the adapter works |
-| [API.md](API.md) | Every HTTP endpoint |
-| [DEMO.md](DEMO.md) | Demo dataset & sample queries |
-| [LIMITATIONS.md](LIMITATIONS.md) | Limits vs PostgreSQL + future scope |
+Set in `backend/.env` (see `.env.example`). Highlights:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATABASE_PATH` | `optimizer_demo.db` | SQLite file connected at startup |
+| `ALLOW_INDEX_CREATION` | `false` | Databases are opened **read-only** unless this is `true` |
+| `OPENAI_API_KEY` | _(empty)_ | Optional; the copilot works offline without it |
+| `MIN_ESTIMATED_GAIN_PCT` | `0.5` | A rewrite must beat your query by at least this estimate |
+| cost-model constants | see `.env.example` | I/O, CPU, rows-per-page and fallback selectivities |
 
 ## Tests
 
@@ -119,7 +99,25 @@ Then open the dashboard, go to **SQL Optimizer**, and click **Optimize**.
 cd backend && pytest -q
 ```
 
-48 tests cover parsing, safety, schema discovery, statistics, selectivity,
-cardinality, cost, join ordering, physical plans, transformations, index advisor,
-EXPLAIN parsing, and benchmarking — run against **both** the e-commerce and the
-unrelated library schema.
+Covers parsing, safety, schema discovery, statistics, selectivity, cardinality, cost, join
+ordering, plans, rewriting and equivalence checking, the HTTP API, database switching, the
+read-only guarantee, concurrency, determinism across hash seeds, and a database with
+awkward identifiers — on more than one schema.
+
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| [SETUP.md](SETUP.md) | Install and run |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Modules and data flow |
+| [OPTIMIZER.md](OPTIMIZER.md) | Parsing, plans, rewrite and verification |
+| [COST_MODEL.md](COST_MODEL.md) | Every cost formula |
+| [STATISTICS.md](STATISTICS.md) | How statistics and selectivity work |
+| [DATABASES.md](DATABASES.md) | Database support and the adapter layer |
+| [API.md](API.md) | HTTP endpoints |
+| [DEMO.md](DEMO.md) | Demo data and sample queries |
+| [LIMITATIONS.md](LIMITATIONS.md) | What it does not do |
+
+## License
+
+MIT — see [LICENSE](LICENSE).

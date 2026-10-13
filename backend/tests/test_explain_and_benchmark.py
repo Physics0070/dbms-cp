@@ -30,7 +30,7 @@ def test_compare_structure(ecommerce_adapter):
     res = JoinOptimizer(PhysicalPlanner(pq, stats, schema)).optimize()
     parsed = parse_explain_query_plan(ecommerce_adapter.explain_query(sql))
     cmp = compare(res.selected.plan.to_dict(), parsed, pq.alias_to_table)
-    assert "custom" in cmp and "turso" in cmp and "differences" in cmp
+    assert "custom" in cmp and "engine" in cmp and "differences" in cmp
 
 
 def test_benchmark_reports_stats(ecommerce_adapter):

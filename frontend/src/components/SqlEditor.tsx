@@ -40,14 +40,20 @@ export function highlight(code: string): string {
   return out + "\n";
 }
 
-/** Read-only, highlighted SQL block. Content is HTML-escaped by `highlight`. */
-export function SqlView({ sql, maxHeight = 360 }: { sql: string; maxHeight?: number }) {
+/** Read-only, highlighted SQL block. Content is HTML-escaped by `highlight`.
+ *  `marks` is a set of 0-based line indices to flag as added/removed (see lib/diff). */
+export function SqlView({
+  sql, maxHeight = 360, marks, markTone,
+}: { sql: string; maxHeight?: number; marks?: Set<number>; markTone?: "add" | "del" }) {
+  const lines = sql.split("\n");
   return (
-    <pre
-      className="sqled-shared overflow-auto rounded-lg border border-line bg-panel-2"
-      style={{ maxHeight }}
-      dangerouslySetInnerHTML={{ __html: highlight(sql) }}
-    />
+    <pre className="sqled-shared overflow-auto rounded-lg border border-line bg-panel-2" style={{ maxHeight }}>
+      {lines.map((line, i) => (
+        <div key={i}
+          className={marks?.has(i) ? (markTone === "del" ? "dl dl-del" : "dl dl-add") : "dl"}
+          dangerouslySetInnerHTML={{ __html: highlight(line).replace(/\n$/, "") || "&nbsp;" }} />
+      ))}
+    </pre>
   );
 }
 

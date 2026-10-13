@@ -1,4 +1,4 @@
-"""Parse SQLite/libSQL `EXPLAIN QUERY PLAN` output and compare it to our plan.
+"""Parse SQLite `EXPLAIN QUERY PLAN` output and compare it to our plan.
 
 We only rely on SQLite-supported mechanisms (EXPLAIN QUERY PLAN, and optionally
 EXPLAIN bytecode). We never assume PostgreSQL EXPLAIN ANALYZE semantics.
@@ -97,49 +97,49 @@ def summarize_custom_plan(plan: dict) -> dict:
 
 def compare(custom_plan: dict, explain_parsed: dict, alias_map: dict[str, str] | None = None) -> dict:
     custom = summarize_custom_plan(custom_plan)
-    turso = explain_parsed
+    engine = explain_parsed
     alias_map = alias_map or {}
 
     def to_real(name: str) -> str:
         return alias_map.get(name, name)
 
     custom_tables = {to_real(t) for t in custom["tables"]}
-    turso_tables = {to_real(t) for t in turso["tables"]}
+    engine_tables = {to_real(t) for t in engine["tables"]}
 
     differences = []
-    if custom_tables != turso_tables:
+    if custom_tables != engine_tables:
         differences.append(
-            f"Tables referenced differ: custom={sorted(custom_tables)} vs Turso={sorted(turso_tables)}."
+            f"Tables referenced differ: custom={sorted(custom_tables)} vs engine={sorted(engine_tables)}."
         )
     custom_uses_index = bool(custom["indexes_used"]) or "IndexScan" in custom["scan_methods"]
-    turso_uses_index = bool(turso["indexes_used"]) or any(
-        s.get("access") in ("index-search", "rowid-lookup") for s in turso["steps"]
+    engine_uses_index = bool(engine["indexes_used"]) or any(
+        s.get("access") in ("index-search", "rowid-lookup") for s in engine["steps"]
     )
-    if custom_uses_index != turso_uses_index:
+    if custom_uses_index != engine_uses_index:
         differences.append(
             f"Index usage differs: custom {'uses' if custom_uses_index else 'does not use'} an index; "
-            f"Turso {'uses' if turso_uses_index else 'does not use'} one."
+            f"SQLite {'uses' if engine_uses_index else 'does not use'} one."
         )
-    if custom["has_sort"] != turso["uses_temp_btree"]:
+    if custom["has_sort"] != engine["uses_temp_btree"]:
         differences.append(
             f"Sorting differs: custom plan {'sorts' if custom['has_sort'] else 'does not sort'}; "
-            f"Turso {'uses a temp B-tree' if turso['uses_temp_btree'] else 'does not use a temp B-tree'}."
+            f"SQLite {'uses a temp B-tree' if engine['uses_temp_btree'] else 'does not use a temp B-tree'}."
         )
 
     return {
         "custom": custom,
-        "turso": {
-            "tables": sorted(turso_tables),
-            "tables_raw": turso["tables"],
-            "indexes_used": turso["indexes_used"],
-            "uses_temp_btree": turso["uses_temp_btree"],
-            "steps": turso["steps"],
+        "engine": {
+            "tables": sorted(engine_tables),
+            "tables_raw": engine["tables"],
+            "indexes_used": engine["indexes_used"],
+            "uses_temp_btree": engine["uses_temp_btree"],
+            "steps": engine["steps"],
         },
         "differences": differences,
         "agreement": {
-            "same_tables": custom_tables == turso_tables,
-            "same_index_usage": custom_uses_index == turso_uses_index,
+            "same_tables": custom_tables == engine_tables,
+            "same_index_usage": custom_uses_index == engine_uses_index,
         },
-        "note": "Our cost model is an independent educational estimator; SQLite/libSQL "
+        "note": "Our cost model is an independent educational estimator; SQLite "
                 "uses its own planner. Differences are expected and informative.",
     }
