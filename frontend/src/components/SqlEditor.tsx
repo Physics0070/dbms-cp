@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { api } from "../api";
 
 const KEYWORDS = new Set([
   "select", "from", "where", "join", "inner", "left", "right", "full", "outer", "cross",
@@ -47,7 +48,7 @@ export function SqlView({
 }: { sql: string; maxHeight?: number; marks?: Set<number>; markTone?: "add" | "del" }) {
   const lines = sql.split("\n");
   return (
-    <pre className="sqled-shared overflow-auto rounded-lg border border-line bg-panel-2" style={{ maxHeight }}>
+    <pre className="sqled-shared overflow-auto rounded-sm border border-line bg-panel-2" style={{ maxHeight }}>
       {lines.map((line, i) => (
         <div key={i}
           className={marks?.has(i) ? (markTone === "del" ? "dl dl-del" : "dl dl-add") : "dl"}
@@ -67,53 +68,83 @@ export function SqlEditor({
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
+  const gutRef = useRef<HTMLDivElement>(null);
+  const [check, setCheck] = useState<{ valid: boolean; message: string } | null>(null);
+  const lineCount = value.split("\n").length;
 
-  useLayoutEffect(() => {
-    if (preRef.current && taRef.current) {
-      preRef.current.scrollTop = taRef.current.scrollTop;
-      preRef.current.scrollLeft = taRef.current.scrollLeft;
-    }
+  const sync = (ta: HTMLTextAreaElement) => {
+    if (preRef.current) { preRef.current.scrollTop = ta.scrollTop; preRef.current.scrollLeft = ta.scrollLeft; }
+    if (gutRef.current) gutRef.current.style.transform = `translateY(${-ta.scrollTop}px)`;
+  };
+  useLayoutEffect(() => { if (taRef.current) sync(taRef.current); }, [value]);
+
+  // Debounced server-side parse check; stale responses are ignored.
+  useEffect(() => {
+    if (!value.trim()) { setCheck(null); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      api.validate(value).then((r) => live && setCheck(r)).catch(() => live && setCheck(null));
+    }, 600);
+    return () => { live = false; clearTimeout(t); };
   }, [value]);
 
+  async function format() {
+    const { format: fmtSql } = await import("sql-formatter"); // lazy: loaded on first use
+    try { onChange(fmtSql(value, { language: "sqlite", keywordCase: "upper" })); }
+    catch { /* unparseable text is left as typed; the status line explains why */ }
+  }
+
+  const escaped = useRef(false);
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Ctrl/Cmd+Enter runs; Tab inserts two spaces instead of leaving the field.
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
-      onRun?.();
-      return;
-    }
-    if (e.key === "Tab") {
+    if (e.key !== "Escape" && e.key !== "Tab") escaped.current = false;
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); onRun?.(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); format(); return; }
+    if (e.key === "Escape") { escaped.current = true; return; }  // Esc, then Tab: leave the editor (no keyboard trap)
+    if (e.key === "Tab" && !escaped.current) {
       e.preventDefault();
       const ta = e.currentTarget;
       const s = ta.selectionStart, en = ta.selectionEnd;
-      const next = value.slice(0, s) + "  " + value.slice(en);
-      onChange(next);
+      onChange(value.slice(0, s) + "  " + value.slice(en));
       requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 2; });
     }
   }
 
   return (
-    <div className="sqled rounded-lg border border-line bg-panel-2 focus-within:border-[color:var(--accent)] focus-within:ring-2 focus-within:ring-[color:var(--ring)]"
-      style={{ height }}>
-      <pre ref={preRef} className="sqled-shared sqled-pre" aria-hidden="true"
-        dangerouslySetInnerHTML={{ __html: highlight(value) }} />
-      <textarea
-        ref={taRef}
-        className="sqled-shared sqled-ta"
-        value={value}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        aria-label="SQL query editor"
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKey}
-        onScroll={(e) => {
-          if (preRef.current) {
-            preRef.current.scrollTop = e.currentTarget.scrollTop;
-            preRef.current.scrollLeft = e.currentTarget.scrollLeft;
-          }
-        }}
-      />
+    <div>
+      <div className="sqled sqled-nowrap overflow-hidden rounded-sm border border-line bg-panel-2 focus-within:border-[color:var(--accent)] focus-within:ring-2 focus-within:ring-[color:var(--ring)]"
+        style={{ height }}>
+        <div className="sqled-gutter" aria-hidden="true">
+          <div ref={gutRef} className="sqled-shared sqled-gut-inner">
+            {Array.from({ length: lineCount }, (_, i) => <div key={i}>{i + 1}</div>)}
+          </div>
+        </div>
+        <pre ref={preRef} className="sqled-shared sqled-pre" aria-hidden="true"
+          dangerouslySetInnerHTML={{ __html: highlight(value) }} />
+        <textarea
+          ref={taRef}
+          className="sqled-shared sqled-ta"
+          value={value}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          wrap="off"
+          aria-label="SQL query editor"
+          title="Tab inserts spaces. Press Esc, then Tab, to move focus out of the editor."
+          aria-describedby="sqled-status"
+          aria-invalid={check ? !check.valid : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          onScroll={(e) => sync(e.currentTarget)}
+        />
+      </div>
+      <div className="mt-1.5 flex items-center gap-2 text-2xs">
+        <span id="sqled-status" role="status" aria-live="polite"
+          className={`min-w-0 flex-1 truncate ${check ? (check.valid ? "text-ok" : "text-err") : "text-faint"}`}>
+          {check ? `${check.valid ? "✓" : "✕"} ${check.message.replace(/\x1b\[[0-9;]*m/g, "")}` : " "}
+        </span>
+        <button type="button" className="btn btn-ghost !px-2 !py-1 text-2xs" onClick={format}
+          title="Format SQL (Ctrl+Shift+F)" aria-label="Format SQL">⌗ Format</button>
+      </div>
     </div>
   );
 }

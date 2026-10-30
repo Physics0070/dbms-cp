@@ -25,6 +25,7 @@ export default {
         err: "var(--err)",
       },
       fontFamily: {
+        display: ["Fraunces", "Georgia", "serif"],
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
@@ -32,9 +33,10 @@ export default {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }],
       },
       borderRadius: {
-        md: "0.5rem",
-        lg: "0.625rem",
-        xl: "0.875rem",
+        sm: "2px",
+        md: "3px",
+        lg: "4px",
+        xl: "6px",
       },
       boxShadow: {
         panel: "0 1px 2px rgba(0,0,0,0.25), 0 8px 24px -16px rgba(0,0,0,0.5)",

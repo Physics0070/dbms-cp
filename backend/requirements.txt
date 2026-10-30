@@ -6,3 +6,7 @@ python-dotenv==1.0.1
 sqlglot==30.15.0
 httpx==0.28.1
 pytest==9.1.1
+pymysql==1.2.3
+cryptography>=42
+psycopg[binary]==3.3.6
+duckdb==2.0.0

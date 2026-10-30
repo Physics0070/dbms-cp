@@ -104,8 +104,8 @@ class QueryContext:
         return self.alias_to_table.get(alias)
 
 
-def parse_query(sql: str, schema: dict[str, TableSchema]) -> ParsedQuery:
-    root = validate_readonly(sql)
+def parse_query(sql: str, schema: dict[str, TableSchema], dialect: Optional[str] = None) -> ParsedQuery:
+    root = validate_readonly(sql, dialect)
     select = root.this if isinstance(root, exp.With) else root
     if not isinstance(select, exp.Select):
         raise ValueError("Only SELECT statements are supported for optimization.")

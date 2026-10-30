@@ -1,0 +1,12 @@
+services:
+  querypilot:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      API_TOKEN: ${API_TOKEN:-}          # set this for any non-local deployment
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
+    volumes:
+      - querypilot-data:/app/backend/data
+volumes:
+  querypilot-data:

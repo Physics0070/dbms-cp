@@ -30,6 +30,9 @@ class IndexRecommendation:
     affected_operator: str
     reason: str
     estimated_overhead: dict
+    patterns: list = None  # type: ignore[assignment]
+    dialect: str = "sqlite"
+    assumptions: list = None  # type: ignore[assignment]
 
     @property
     def improvement_pct(self) -> float:
@@ -50,7 +53,54 @@ class IndexRecommendation:
             "affected_operator": self.affected_operator,
             "reason": self.reason,
             "estimated_overhead": self.estimated_overhead,
+            "ddl": _quoted_ddl(self.table, self.columns, self.dialect),
+            "patterns": self.patterns or [self.source],
+            "filter_columns": self.columns,
+            "expected_plan_change": _plan_change(self.affected_operator, self.improvement_pct),
+            "benefit_basis": "analytical simulation",
+            "assumptions": self.assumptions or _ASSUMPTIONS,
+            "tradeoffs": _TRADEOFFS,
         }
+
+
+_ASSUMPTIONS = [
+    "Benefit is the drop in this tool's own cost-model estimate, not a measured speedup.",
+    "Selectivity comes from table statistics at the time of analysis; stale statistics change the result.",
+]
+_TRADEOFFS = [
+    "Every INSERT, DELETE and UPDATE of an indexed column must also maintain the index.",
+    "The index consumes extra disk space and cache; indexes that no query uses are pure cost.",
+]
+_FIXED_WIDTH = {"INTEGER", "INT", "REAL", "BOOLEAN", "DATE", "DATETIME"}
+
+
+def _quote(name: str, dialect: str = "sqlite") -> str:
+    if dialect == "mysql":
+        return "`" + name.replace("`", "``") + "`"
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _quoted_ddl(table: str, columns: list[str], dialect: str = "sqlite") -> str:
+    name = f"idx_{table}_{'_'.join(columns)}"
+    q = lambda n: _quote(n, dialect)  # noqa: E731
+    # MySQL has no CREATE INDEX IF NOT EXISTS.
+    ine = "" if dialect == "mysql" else "IF NOT EXISTS "
+    return f"CREATE INDEX {ine}{q(name)} ON {q(table)} ({', '.join(q(c) for c in columns)});"
+
+
+def _plan_change(op: str, pct: float) -> str:
+    if pct <= 0 or op in ("", "none"):
+        return "No change: the optimizer would not use this index for this query."
+    return f"{op} would appear in the plan in place of a scan-based access path."
+
+
+def _storage_estimate(ts, columns: list[str], rows: int) -> dict:
+    cols = [ts.column(c) for c in columns]
+    if all(c is not None and c.data_type.upper().split("(")[0].strip() in _FIXED_WIDTH for c in cols):
+        # ponytail: crude b-tree model (key + 8-byte rowid, no page overhead); unavailable for text/blob keys
+        return {"bytes_estimate": rows * (8 * len(cols) + 8),
+                "basis": "rows x (8 bytes per fixed-width key column + 8-byte rowid), excluding b-tree page overhead"}
+    return {"bytes_estimate": None, "basis": "unavailable: variable-width key column (text/blob) with no width statistics"}
 
 
 class IndexAdvisor:
@@ -59,6 +109,21 @@ class IndexAdvisor:
         self.stats = stats
         self.schema = schema
         self.cfg = get_settings()
+        adapter = getattr(stats, "adapter", None)
+        self.dialect = getattr(adapter, "dialect", "sqlite")
+        self.engine = getattr(adapter, "engine", "SQLite")
+        caps = getattr(adapter, "capabilities", {}) or {}
+        self.hypo_available = bool(caps.get("hypothetical_index"))
+
+    def _hypo_sentence(self) -> str:
+        if self.hypo_available:
+            return f"{self.engine} supports hypothetical indexes here, but this tool does not use them"
+        return f"{self.engine} has no hypothetical-index facility available here"
+
+    def _assumptions(self) -> list:
+        a = list(_ASSUMPTIONS)
+        a.insert(1, f"{self._hypo_sentence()[0].upper()}{self._hypo_sentence()[1:]}, so the index is simulated on a copy of the schema.")
+        return a
 
     def _baseline_cost(self) -> float:
         planner = PhysicalPlanner(self.parsed, self.stats, self.schema, self.cfg)
@@ -126,18 +191,21 @@ class IndexAdvisor:
             row_count = self.stats.row_count(real)
             overhead = {
                 "index_entries": row_count,
+                **_storage_estimate(ts, [column], row_count),
                 "note": "Adds storage proportional to row count and slows INSERT/UPDATE "
                         "on this table; created only if you choose to.",
             }
             reason = _reason(source, affected, baseline, hypo_cost)
             recs.append(IndexRecommendation(
                 real, [column], source, baseline, hypo_cost, affected, reason, overhead,
+                [f"{source} on {alias}.{column}"], self.dialect, self._assumptions(),
             ))
         recs.sort(key=lambda r: r.hypothetical_cost)
         return {
             "baseline_cost": round(baseline, 4),
             "recommendations": [r.to_dict() for r in recs],
-            "note": "Hypothetical analysis only — no index is created unless explicitly requested.",
+            "note": f"Analytical simulation only ({self._hypo_sentence()}). No index is created unless you explicitly confirm.",
+            "native_hypothetical_indexes": False,
         }
 
 

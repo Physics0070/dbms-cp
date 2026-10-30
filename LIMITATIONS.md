@@ -42,6 +42,18 @@
   are deterministic templates over the structured data. In both cases the copilot is
   constrained to the supplied optimizer data and may say information is unavailable.
 
+## Deployment & product gaps
+
+- **No authentication** on any endpoint. Uploads are accepted from anyone who can reach the
+  server; set `ALLOW_PATH_CONNECT=false` and put it behind your own access control if exposed.
+- Only SQLite is supported: no PostgreSQL/MySQL/DuckDB adapters, no remote connections (so no
+  SSRF controls exist), and no hosted-deployment hardening.
+- No saved-investigation/regression lab, plan-vs-plan diff, or workload CSV import in the
+  committed feature set (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)).
+- Upload validation (header, `quick_check`, read-only open) is not a defence against every
+  malicious SQLite file; treat uploads from untrusted users as unsafe.
+- The 3D landing scene shows an illustrative sample plan, not data from your database.
+
 ## Explicitly out of scope (future scope)
 
 These are intentionally **not** implemented until the core is complete and are recorded

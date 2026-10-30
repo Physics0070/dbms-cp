@@ -24,6 +24,15 @@ The connected database: `{ connected, engine, name, path, read_only, tables, tab
 ### `POST /api/database/connect`
 `{ "path": "C:\\data\\my.db" }` switches to another SQLite file (opened read-only). `400` with a
 clear message if the file is missing or is not a SQLite database; the previous connection stays.
+`403` when the server sets `ALLOW_PATH_CONNECT=false`.
+
+### `POST /api/database/upload`
+Upload a SQLite file as the **raw request body** (not multipart). Send `Content-Type:
+application/octet-stream` and the original name in an `X-Filename` header (display only; it is
+never used on disk). The file is stored under a server-generated name, size-capped
+(`MAX_UPLOAD_MB`), checked for the SQLite header and `PRAGMA quick_check`, and opened read-only.
+Returns the same shape as `/api/database/connect` plus `uploaded: true`; `path` is `null`.
+`400` with a message for empty, oversized, non-SQLite or corrupt files; the previous connection stays.
 
 ### `GET /api/schema`
 Full schema: every table with columns, primary key, indexes, foreign keys, row counts,

@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     # --- Database -----------------------------------------------------------
     database_path: str = "optimizer_demo.db"   # SQLite file connected at startup
     allow_index_creation: bool = False          # False -> database opened read-only
+    upload_dir: str = ""                        # empty -> backend/data/uploads (never served statically)
+    max_upload_mb: int = 100                    # reject larger SQLite uploads
+    allow_private_network: bool = False         # remote DB hosts that resolve to private/loopback IPs are blocked
+    pg_statement_timeout_ms: int = 30000        # server-side cap per PostgreSQL statement
+    pg_connect_timeout_s: int = 8
+    allow_path_connect: bool = True             # False on hosted deployments: only uploads/startup DB
 
     # --- AI -----------------------------------------------------------------
     openai_api_key: str = ""
@@ -64,6 +70,18 @@ class Settings(BaseSettings):
     example_limit: int = 6               # example queries generated from the schema
     optimizer_version: str = "1.1.0"
     stats_cache_ttl: int = 300
+
+    # --- AI copilot privacy -------------------------------------------------
+    copilot_send_schema: bool = True     # False -> table/column names are obfuscated before any external call
+
+    # --- Hardening ----------------------------------------------------------
+    log_level: str = "INFO"
+    max_request_mb: int = 10             # body cap for every endpoint except /api/database/upload
+    request_timeout_s: float = 300.0     # 0 disables; client gets 504 (a running sync handler is not killed)
+    rate_limit_per_min: int = 120        # per client IP on heavy endpoints; 0 disables
+    api_token: str = ""                  # set -> every /api/* call except /api/health needs "Authorization: Bearer <token>"
+    serve_frontend: bool = True          # serve frontend/dist (if built) from this server
+    frontend_dist: str = ""              # empty -> ../frontend/dist relative to the repo
     # Comma-separated origins allowed to call the API from a browser.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

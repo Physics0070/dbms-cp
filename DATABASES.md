@@ -6,9 +6,16 @@
 exports from other tools. Nothing in the optimizer knows a table or column name; everything
 is discovered from the connected file at request time.
 
-Other engines (PostgreSQL, MySQL, ...) are **not supported**. They would each need their own
-adapter, their own `EXPLAIN` parser, and their own statistics source, and the optimizer's cost
-model has only been validated against SQLite.
+**PostgreSQL** (read-only, via the Connect form or `POST /api/database/connect-remote`): schema
+discovery, statistics, `EXPLAIN (FORMAT JSON)` plans (estimated, never executed), benchmarking.
+Integration-tested against a real PostgreSQL 16.2. Limits: parsing and rewriting still use the
+SQLite dialect (Postgres-only syntax may fail), no actual-plan analysis, TLS/auth modes and other
+versions untested. Hosts that resolve to private or loopback addresses are blocked unless
+`ALLOW_PRIVATE_NETWORK=true`.
+
+**MySQL**: an adapter exists and passed its tests on MySQL 8.0, but it is **not wired into the app**
+and the optimizer pipeline has not been run on it. Not supported. DuckDB and others are not
+supported; no cross-database behaviour is claimed beyond what is stated above.
 
 ## The adapter layer
 
@@ -47,7 +54,8 @@ itself would not change.
 
 ## Switching databases
 
-From the UI: click the database chip in the top bar and enter a path. From the API:
+From the UI: click the database chip in the top bar, then upload a file or enter a path (path
+entry can be disabled with `ALLOW_PATH_CONNECT=false`; see [SETUP.md](SETUP.md)). From the API:
 `POST /api/database/connect {"path": "..."}`. The path is read by the backend on its own
 machine. If the file is missing, not a SQLite database, or unreadable, the request fails with
 a clear message and the previous connection stays active.

@@ -28,3 +28,8 @@ frontend/.vite/
 .claude/settings.local.json
 frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+backend/data/
+frontend/test-results/
+frontend/playwright-report/
+backend/data/

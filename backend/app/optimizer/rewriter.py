@@ -92,10 +92,17 @@ class _Resolver:
 
 
 def rewrite_query(
-    parsed: ParsedQuery, best_order: list[str], schema: dict[str, TableSchema]
+    parsed: ParsedQuery, best_order: list[str], schema: dict[str, TableSchema],
+    dialect: str = "sqlite",
 ) -> RewriteOutcome:
     original_order = list(parsed.alias_to_table.keys())
     out = RewriteOutcome("unsupported", original_order=original_order, join_order=list(best_order))
+    if dialect != "sqlite":
+        out.reasons.append(
+            f"Join-order rewriting pins the order with CROSS JOIN ... ON, which only SQLite honours. "
+            f"The {dialect} planner chooses its own join order, so no rewrite is offered for it."
+        )
+        return out
 
     select = parsed.ast
     if not isinstance(select, exp.Select):

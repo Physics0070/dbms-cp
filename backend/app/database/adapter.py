@@ -110,6 +110,21 @@ class TableStatistics:
 class DatabaseAdapter(ABC):
     """Every capability the optimizer needs from a database."""
 
+    # sqlglot dialect used to parse and emit SQL for this engine.
+    dialect: str = "sqlite"
+
+    # Keys are fixed so the UI can rely on them. A flag is True only when the adapter really
+    # implements the operation; subclasses override with their own truthful values.
+    CAPABILITY_KEYS = (
+        "schema_introspection", "index_discovery", "statistics", "native_explain",
+        "actual_plan_analysis", "benchmarking", "hypothetical_index", "sql_rewrite",
+        "result_equivalence",
+    )
+
+    @property
+    def capabilities(self) -> dict[str, bool]:
+        return {k: False for k in self.CAPABILITY_KEYS}
+
     @abstractmethod
     def get_tables(self) -> list[str]:
         ...

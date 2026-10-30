@@ -29,7 +29,7 @@ class CreateIndexRequest(BaseModel):
 def advise(req: SqlRequest, adapter: SqliteAdapter = Depends(adapter_dep)) -> dict:
     try:
         schema = adapter.get_schema()
-        parsed = parse_query(req.sql, schema)
+        parsed = parse_query(req.sql, schema, adapter.dialect)
     except UnsafeQueryError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

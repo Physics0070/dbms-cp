@@ -5,6 +5,8 @@ like comments or casing cannot smuggle a write past us.
 """
 from __future__ import annotations
 
+import re
+
 import sqlglot
 from sqlglot import exp
 
@@ -36,13 +38,29 @@ _FORBIDDEN_KEYWORDS = {
 }
 
 
-def validate_readonly(sql: str, dialect: str = "sqlite") -> exp.Expression:
+# SQLite functions that touch the filesystem or load native code.
+_FORBIDDEN_FUNCTIONS = (
+    "LOAD_EXTENSION", "READFILE", "WRITEFILE", "EDIT", "FTS3_TOKENIZER", "ZIPFILE",
+)
+
+
+def default_dialect() -> str:
+    """sqlglot dialect of the connected database (sqlite when none is connected)."""
+    from ..database.sqlite_adapter import get_adapter
+    try:
+        return get_adapter().dialect
+    except Exception:
+        return "sqlite"
+
+
+def validate_readonly(sql: str, dialect: Optional[str] = None) -> exp.Expression:
     """Parse `sql`, guarantee it is a single read-only SELECT, return the AST.
 
     Raises :class:`UnsafeQueryError` on anything that could mutate state.
     """
     if not sql or not sql.strip():
         raise UnsafeQueryError("Empty query.")
+    dialect = dialect or default_dialect()
 
     try:
         statements = sqlglot.parse(sql, read=dialect)
@@ -83,6 +101,11 @@ def validate_readonly(sql: str, dialect: str = "sqlite") -> exp.Expression:
         if _contains_word(upper, kw):
             raise UnsafeQueryError(f"Forbidden keyword detected: {kw}")
 
+    flat = " ".join(upper.split())  # tabs/newlines between name and "(" must not slip past
+    for fn in _FORBIDDEN_FUNCTIONS:
+        if re.search("(?<![A-Z0-9_])" + fn + "[ ]*[(]", flat):
+            raise UnsafeQueryError(f"Function {fn.lower()}() is not permitted.")
+
     return root
 
 
@@ -107,6 +130,4 @@ def _strip_string_literals(sql: str) -> str:
 
 
 def _contains_word(haystack: str, word: str) -> bool:
-    import re
-
     return re.search(rf"\b{re.escape(word)}\b", haystack) is not None

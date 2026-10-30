@@ -89,6 +89,17 @@ class SqliteAdapter(DatabaseAdapter):
         return f"SQLite · {self.path.name} ({mode})"
 
     @property
+    def capabilities(self) -> dict[str, bool]:
+        # actual_plan_analysis: SQLite exposes no per-operator actual rows/timings.
+        # hypothetical_index: SQLite has no native hypothetical indexes; the advisor is a simulation.
+        return {
+            **super().capabilities,
+            "schema_introspection": True, "index_discovery": True, "statistics": True,
+            "native_explain": True, "actual_plan_analysis": False, "benchmarking": True,
+            "hypothetical_index": False, "sql_rewrite": True, "result_equivalence": True,
+        }
+
+    @property
     def read_only(self) -> bool:
         return not self._settings.allow_index_creation
 

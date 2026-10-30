@@ -1,78 +1,82 @@
-import { useState } from "react";
+import { lazy, Suspense } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { TopBar } from "./components/TopBar";
-import { useStore } from "./store";
+import { StatusBar } from "./components/StatusBar";
+import { TokenGate } from "./components/TokenGate";
 import Workspace from "./pages/Workspace";
 import SchemaExplorer from "./pages/SchemaExplorer";
 import Statistics from "./pages/Statistics";
 import History from "./pages/History";
+import Workload from "./pages/Workload";
+import IndexLab from "./pages/IndexLab";
+import Lab from "./pages/Lab";
 
-const NAV = [
-  { to: "/", label: "Workspace", icon: "⚡", end: true },
-  { to: "/schema", label: "Schema", icon: "⬡" },
-  { to: "/statistics", label: "Statistics", icon: "▤" },
-  { to: "/history", label: "History", icon: "⟲" },
+const Landing = lazy(() => import("./landing/Landing"));
+
+export const NAV = [
+  { to: "/app", label: "Workspace", end: true },
+  { to: "/app/schema", label: "Schema" },
+  { to: "/app/statistics", label: "Statistics" },
+  { to: "/app/workload", label: "Workloads" },
+  { to: "/app/index-lab", label: "Index Lab" },
+  { to: "/app/lab", label: "Lab" },
+  { to: "/app/history", label: "History" },
 ];
 
 export default function App() {
-  const { loading, result } = useStore();
-  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <>
+    <TokenGate />
+    <Routes>
+      <Route path="/" element={<Suspense fallback={null}><div className="h-screen"><Landing /></div></Suspense>} />
+      <Route path="/app/*" element={<Workbench />} />
+    </Routes>
+    </>
+  );
+}
 
+function Workbench() {
   return (
     <div className="flex h-screen flex-col">
       <TopBar />
-      <div className="flex min-h-0 flex-1">
-        {/* Icon rail on small screens; full labels on md+ (manual collapse on desktop). */}
-        <aside
-          className={`flex shrink-0 flex-col border-r border-line bg-panel transition-[width] duration-200
-            ${collapsed ? "w-[56px]" : "w-[56px] md:w-[208px]"}`}
-        >
-          <nav className="flex-1 space-y-1 p-2">
-            {NAV.map((n) => (
+      <nav aria-label="Sections" className="sticky top-14 z-20 shrink-0 overflow-x-auto border-b border-line bg-[color:var(--bg)]">
+        <ul className="mx-auto flex max-w-[1360px] min-w-max px-2 sm:px-6">
+          {NAV.map((n, i) => (
+            <li key={n.to}>
               <NavLink
-                key={n.to}
                 to={n.to}
                 end={n.end}
-                title={n.label}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-                    isActive ? "bg-[color:var(--accent-soft)] text-accent" : "text-muted hover:bg-panel-2 hover:text-ink"
+                  `-mb-px flex items-baseline gap-2 border-b-2 px-3.5 py-3 font-mono text-2xs font-semibold uppercase tracking-[0.14em] transition-colors
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] ${
+                    isActive ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink"
                   }`
                 }
               >
-                <span className="grid w-5 shrink-0 place-items-center text-base">{n.icon}</span>
-                <span className={collapsed ? "hidden" : "hidden md:inline"}>{n.label}</span>
+                <span className="text-accent">{String(i + 1).padStart(2, "0")}</span>
+                {n.label}
               </NavLink>
-            ))}
-          </nav>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
-          <div className="space-y-2 border-t border-line p-2">
-            <div className={`items-center justify-between px-1 text-2xs ${collapsed ? "hidden" : "hidden md:flex"}`}>
-              <span className="text-faint">Query</span>
-              <span className={`chip ${loading ? "bg-[color:var(--warn-soft)] text-warn" : result ? "bg-[color:var(--ok-soft)] text-ok" : "bg-panel-3 text-faint"}`}>
-                {loading ? "running" : result ? "ready" : "idle"}
-              </span>
-            </div>
-            <button className="btn btn-subtle hidden w-full justify-center md:flex" onClick={() => setCollapsed((c) => !c)}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-              {collapsed ? "»" : "« Collapse"}
-            </button>
-          </div>
-        </aside>
-
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <Routes>
-            <Route path="/" element={<Workspace />} />
-            <Route path="/schema" element={<Page><SchemaExplorer /></Page>} />
-            <Route path="/statistics" element={<Page><Statistics /></Page>} />
-            <Route path="/history" element={<Page><History /></Page>} />
-          </Routes>
-        </main>
-      </div>
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        <Routes>
+          <Route index element={<Workspace />} />
+          <Route path="schema" element={<Page><SchemaExplorer /></Page>} />
+          <Route path="statistics" element={<Page><Statistics /></Page>} />
+          <Route path="workload" element={<Page><Workload /></Page>} />
+          <Route path="index-lab" element={<Page><IndexLab /></Page>} />
+          <Route path="lab" element={<Page><Lab /></Page>} />
+          <Route path="history" element={<Page><History /></Page>} />
+        </Routes>
+      </main>
+      <StatusBar />
     </div>
   );
 }
 
 function Page({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto max-w-6xl animate-fade-in p-6">{children}</div>;
+  return <div className="mx-auto max-w-[1360px] animate-fade-in px-4 py-8 sm:px-6">{children}</div>;
 }

@@ -40,12 +40,12 @@ def build_optimized_query(
         "naive_baseline": overall["naive_baseline"],
         "note": "Estimated by the cost model — not a measured speedup.",
     }
-    rw = rewrite_query(parsed, order, schema)
+    rw = rewrite_query(parsed, order, schema, adapter.dialect)
     report: dict = {
         "status": rw.status,
         "original_sql": parsed.sql.strip(),
         # Same formatter as the rewrite, so a line diff shows real changes, not whitespace.
-        "original_pretty": parsed.ast.sql(dialect="sqlite", pretty=True),
+        "original_pretty": parsed.ast.sql(dialect=adapter.dialect, pretty=True),
         "sql": None,
         "changes": rw.changes,
         "reasons": rw.reasons,
@@ -104,7 +104,7 @@ def optimize_query(
     stats = StatisticsProvider(adapter)
     schema = adapter.get_schema()
 
-    parsed = parse_query(sql, schema)
+    parsed = parse_query(sql, schema, adapter.dialect)
 
     # cardinality annotation over the logical tree
     card = CardinalityEstimator(stats, parsed.alias_to_table)

@@ -41,6 +41,23 @@ You can also switch files at runtime from the database chip in the top bar, or w
 `POST /api/database/connect`. If the configured file is missing, the backend still starts and
 reports "No database connected" until you open one.
 
+### Upload a database
+
+The top-bar database chip also accepts a SQLite file upload (`POST /api/database/upload`, raw
+body). Uploads are stored in `UPLOAD_DIR` (default `backend/data/uploads`, not served
+statically) under generated names, limited to `MAX_UPLOAD_MB`, validated, opened read-only, and
+earlier uploads are deleted once replaced. A failed upload leaves the current connection alone.
+
+```
+# backend/.env
+UPLOAD_DIR=                # empty -> backend/data/uploads
+MAX_UPLOAD_MB=100
+ALLOW_PATH_CONNECT=true    # set false on any shared/hosted server
+```
+
+`ALLOW_PATH_CONNECT=false` makes `POST /api/database/connect` return 403, so visitors cannot
+open arbitrary files on the server disk; uploads and `DATABASE_PATH` still work.
+
 ### Read-only by default
 
 Databases are opened **read-only**, so analysing a database can never change it. The
@@ -66,6 +83,10 @@ cd frontend
 npm install
 npm run dev          # http://localhost:5173 (proxies /api to :8000)
 ```
+
+Routes: `/` is the landing page (lazy-loaded Three.js scene, with a static fallback for
+reduced motion or no WebGL); the workbench is at `/app` (`/app/schema`, `/app/statistics`,
+`/app/history`).
 
 Production build: `npm run build && npm run preview`.
 
